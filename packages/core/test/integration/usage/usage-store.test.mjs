@@ -98,6 +98,286 @@ test("usage attribution preserves slash-containing physical model IDs", () => {
   });
 });
 
+test("UsageStore keeps concurrent capture request ids attached to their events", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-request-id-correlation-test-"));
+  try {
+    const databaseFile = path.join(dir, "usage.sqlite");
+    const store = new UsageStore(databaseFile);
+
+    await Promise.all([
+      store.recordCapture({
+        bodyText: JSON.stringify({
+          model: "correlation-alpha",
+          usage: { input_tokens: 11, output_tokens: 2, total_tokens: 13 }
+        }),
+        durationMs: 10,
+        fallbackModel: "fallback-alpha",
+        method: "POST",
+        path: "/v1/messages",
+        requestId: "request-alpha",
+        responseHeaders: new Headers(),
+        statusCode: 200
+      }),
+      store.recordCapture({
+        bodyText: JSON.stringify({
+          model: "correlation-beta",
+          usage: { input_tokens: 23, output_tokens: 5, total_tokens: 28 }
+        }),
+        durationMs: 20,
+        fallbackModel: "fallback-beta",
+        method: "POST",
+        path: "/v1/messages",
+        requestId: "request-beta",
+        responseHeaders: new Headers(),
+        statusCode: 200
+      })
+    ]);
+
+    const database = createBetterSqliteDatabase(databaseFile);
+    try {
+      const rows = database.prepare(`
+        SELECT request_id, model, input_tokens, output_tokens, total_tokens
+        FROM usage_events
+        ORDER BY request_id
+      `).all();
+      assert.deepEqual(rows, [
+        {
+          input_tokens: 11,
+          model: "correlation-alpha",
+          output_tokens: 2,
+          request_id: "request-alpha",
+          total_tokens: 13
+        },
+        {
+          input_tokens: 23,
+          model: "correlation-beta",
+          output_tokens: 5,
+          request_id: "request-beta",
+          total_tokens: 28
+        }
+      ]);
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("UsageStore retains request metadata for failed captures without response usage", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-failed-capture-metadata-test-"));
+  try {
+    const databaseFile = path.join(dir, "usage.sqlite");
+    const store = new UsageStore(databaseFile);
+
+    await store.recordCapture({
+      bodyText: "",
+      durationMs: 25,
+      estimatedPromptTokenCount: 73,
+      fallbackModel: "failed-route",
+      method: "POST",
+      path: "/v1/messages",
+      requestBodySizeBytes: 241,
+      requestId: "failed-request-metadata",
+      responseHeaders: new Headers(),
+      statusCode: 502
+    });
+
+    const database = createBetterSqliteDatabase(databaseFile);
+    try {
+      const row = database.prepare(`
+        SELECT
+          estimated_prompt_token_count,
+          input_tokens,
+          output_tokens,
+          request_body_size_bytes,
+          status_code,
+          total_tokens
+        FROM usage_events
+        WHERE request_id = ?
+      `).get("failed-request-metadata");
+      assert.deepEqual(row, {
+        estimated_prompt_token_count: 73,
+        input_tokens: 0,
+        output_tokens: 0,
+        request_body_size_bytes: 241,
+        status_code: 502,
+        total_tokens: 0
+      });
+    } finally {
+      database.close();
+    }
+
+    const stats = await store.getStats("today", { includeProxy: true });
+    assert.equal(stats.recentRequests[0]?.estimatedPromptTokenCount, 73);
+    assert.equal(stats.recentRequests[0]?.requestBodySizeBytes, 241);
+    assert.equal(stats.recentRequests[0]?.requestId, "failed-request-metadata");
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("UsageStore reports measured prompt tokens while preserving response usage", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-measured-prompt-test-"));
+  try {
+    const databaseFile = path.join(dir, "usage.sqlite");
+    const store = new UsageStore(databaseFile);
+
+    const capture = await store.recordCapture({
+      bodyText: JSON.stringify({
+        model: "measured-model",
+        usage: {
+          completion_tokens: 5,
+          prompt_tokens: 40,
+          prompt_tokens_details: { cached_tokens: 10 },
+          total_tokens: 45
+        }
+      }),
+      durationMs: 20,
+      estimatedPromptTokenCount: 999,
+      fallbackModel: "measured-model",
+      method: "POST",
+      path: "/v1/chat/completions",
+      requestBodySizeBytes: 321,
+      requestId: "measured-prompt-request",
+      responseHeaders: new Headers(),
+      statusCode: 200
+    });
+
+    assert.deepEqual(capture, { measuredPromptTokenCount: 40 });
+    const database = createBetterSqliteDatabase(databaseFile);
+    try {
+      const row = database.prepare(`
+        SELECT
+          cache_read_tokens,
+          estimated_prompt_token_count,
+          input_tokens,
+          output_tokens,
+          request_body_size_bytes,
+          total_tokens
+        FROM usage_events
+        WHERE request_id = ?
+      `).get("measured-prompt-request");
+      assert.deepEqual(row, {
+        cache_read_tokens: 10,
+        estimated_prompt_token_count: 999,
+        input_tokens: 30,
+        output_tokens: 5,
+        request_body_size_bytes: 321,
+        total_tokens: 45
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("UsageStore keeps unavailable prompt estimates null", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-null-prompt-estimate-test-"));
+  try {
+    const databaseFile = path.join(dir, "usage.sqlite");
+    const store = new UsageStore(databaseFile);
+
+    await store.recordCapture({
+      bodyText: "",
+      durationMs: 20,
+      fallbackModel: "failed-model",
+      method: "POST",
+      path: "/v1/messages",
+      requestBodySizeBytes: 89,
+      requestId: "unavailable-prompt-estimate",
+      responseHeaders: new Headers(),
+      statusCode: 499
+    });
+
+    const database = createBetterSqliteDatabase(databaseFile);
+    try {
+      const row = database.prepare(`
+        SELECT estimated_prompt_token_count, request_body_size_bytes
+        FROM usage_events
+        WHERE request_id = ?
+      `).get("unavailable-prompt-estimate");
+      assert.deepEqual(row, {
+        estimated_prompt_token_count: null,
+        request_body_size_bytes: 89
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("UsageStore adds request metadata columns to a legacy database exactly once", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-metadata-migration-test-"));
+  try {
+    const databaseFile = path.join(dir, "usage.sqlite");
+    const legacy = createBetterSqliteDatabase(databaseFile);
+    legacy.exec(`
+      CREATE TABLE usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        request_id TEXT NOT NULL DEFAULT '',
+        client TEXT NOT NULL DEFAULT 'unknown',
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT 'unknown',
+        logical_model TEXT NOT NULL DEFAULT '',
+        provider TEXT NOT NULL DEFAULT 'unknown',
+        credential_id TEXT NOT NULL DEFAULT '',
+        status_code INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL,
+        cost_source TEXT NOT NULL DEFAULT ''
+      )
+    `);
+    legacy.close();
+
+    const store = new UsageStore(databaseFile);
+    await store.recordCapture({
+      bodyText: "",
+      durationMs: 20,
+      estimatedPromptTokenCount: 55,
+      fallbackModel: "legacy-model",
+      method: "POST",
+      path: "/v1/messages",
+      requestBodySizeBytes: 144,
+      requestId: "legacy-migration-request",
+      responseHeaders: new Headers(),
+      statusCode: 499
+    });
+    await new UsageStore(databaseFile).getStats("today", { includeProxy: true });
+
+    const database = createBetterSqliteDatabase(databaseFile);
+    try {
+      const columns = database.prepare("PRAGMA table_info(usage_events)").all().map((row) => row.name);
+      assert.equal(columns.filter((name) => name === "request_body_size_bytes").length, 1);
+      assert.equal(columns.filter((name) => name === "estimated_prompt_token_count").length, 1);
+      const row = database.prepare(`
+        SELECT request_body_size_bytes, estimated_prompt_token_count
+        FROM usage_events
+        WHERE request_id = ?
+      `).get("legacy-migration-request");
+      assert.deepEqual(row, {
+        estimated_prompt_token_count: 55,
+        request_body_size_bytes: 144
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 test("UsageStore aggregates stats in SQLite without loading all events", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-test-"));
   try {
@@ -594,6 +874,84 @@ test("lightweight Fusion usage coalesces concurrent deliveries of the same event
   assert.equal(recordCallCount, 1);
 });
 
+test("UsageStore keeps one event when a request-log backfill races a capture", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-request-id-deduplication-test-"));
+  try {
+    const databaseFile = path.join(dir, "usage.sqlite");
+    const requestLogDbFile = path.join(dir, "request-logs.sqlite");
+    const requestLogStore = new RequestLogStore(requestLogDbFile);
+    const createdAt = new Date().toISOString();
+    let releaseEstimate;
+    let markEstimateStarted;
+    const estimateStarted = new Promise((resolve) => {
+      markEstimateStarted = resolve;
+    });
+    const estimateReleased = new Promise((resolve) => {
+      releaseEstimate = resolve;
+    });
+
+    await requestLogStore.record({
+      client: "Claude Code",
+      completedAt: createdAt,
+      durationMs: 20,
+      method: "POST",
+      path: "/v1/messages",
+      providerName: "dedup-provider",
+      requestBody: Buffer.from('{"model":"dedup-model"}'),
+      requestBodySizeBytes: 333,
+      requestHeaders: { "content-type": "application/json" },
+      requestId: "duplicate-request-id",
+      responseHeaders: new Headers(),
+      startedAt: createdAt,
+      statusCode: 499,
+      url: "http://127.0.0.1:3456/v1/messages"
+    });
+
+    const store = new UsageStore(databaseFile, {
+      estimateCost: async () => {
+        markEstimateStarted();
+        await estimateReleased;
+        return undefined;
+      },
+      requestLogDbFile
+    });
+    const capture = store.record({
+      createdAt,
+      durationMs: 20,
+      method: "POST",
+      model: "dedup-model",
+      path: "/v1/messages",
+      estimatedPromptTokenCount: 73,
+      requestBodySizeBytes: 150,
+      requestId: "duplicate-request-id",
+      statusCode: 499
+    });
+
+    await estimateStarted;
+    await store.getStats("today", { includeProxy: true });
+    releaseEstimate();
+    await capture;
+
+    const database = createBetterSqliteDatabase(databaseFile);
+    try {
+      const row = database.prepare(`
+        SELECT COUNT(*) AS count, request_body_size_bytes, estimated_prompt_token_count
+        FROM usage_events
+        WHERE request_id = ?
+      `).get("duplicate-request-id");
+      assert.deepEqual(row, {
+        count: 1,
+        request_body_size_bytes: 333,
+        estimated_prompt_token_count: 73
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 test("UsageStore backfills missing events from request logs", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccr-usage-request-log-backfill-test-"));
   try {
@@ -610,6 +968,7 @@ test("UsageStore backfills missing events from request logs", async () => {
       path: "/v1/messages",
       providerName: "alpha",
       requestBody: Buffer.from(JSON.stringify({ model: "alpha-model" })),
+      requestBodySizeBytes: 333,
       requestHeaders: { "content-type": "application/json" },
       requestId: "req-backfill-1",
       responseBodyText: JSON.stringify({
@@ -631,6 +990,18 @@ test("UsageStore backfills missing events from request logs", async () => {
     assert.equal(stats.totals.totalTokens, 17);
     assert.equal(stats.providerModels[0]?.provider, "alpha");
     assert.equal(stats.providerModels[0]?.model, "alpha-model");
+
+    const usageDatabase = createBetterSqliteDatabase(path.join(dir, "usage.sqlite"));
+    try {
+      const row = usageDatabase.prepare(`
+        SELECT request_body_size_bytes
+        FROM usage_events
+        WHERE request_id = ?
+      `).get("req-backfill-1");
+      assert.deepEqual(row, { request_body_size_bytes: 333 });
+    } finally {
+      usageDatabase.close();
+    }
 
     const reread = await usageStore.getStats("today", { includeProxy: true });
     assert.equal(reread.totals.requestCount, 1);

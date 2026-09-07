@@ -1,4 +1,5 @@
 import {
+  ROUTER_FALLBACK_MAX_EMPTY_COMPLETION_RETRY_COUNT,
   ROUTER_FALLBACK_MAX_RETRY_COUNT,
   ROUTER_SCRIPT_API_VERSION,
   ROUTER_SCRIPT_DEFAULT_TIMEOUT_MS,
@@ -75,6 +76,8 @@ export function normalizeRouterFallbackConfig(value: Partial<RouterFallbackConfi
   const record = isPlainRecord(value) ? value : {};
   const mode = parseRouterFallbackMode(record.mode) ?? fallbackConfig.Router.fallback.mode;
   const retryCount = clampNumber(Number(record.retryCount), 0, ROUTER_FALLBACK_MAX_RETRY_COUNT);
+  // The routing page has no control for this knob, so carry it through instead of dropping it on save.
+  const emptyCompletionRetryCount = Number(record.emptyCompletionRetryCount);
   const models = Array.isArray(record.models)
     ? uniqueStrings(
       record.models
@@ -84,6 +87,9 @@ export function normalizeRouterFallbackConfig(value: Partial<RouterFallbackConfi
     : [];
 
   return {
+    ...(Number.isFinite(emptyCompletionRetryCount)
+      ? { emptyCompletionRetryCount: clampNumber(emptyCompletionRetryCount, 0, ROUTER_FALLBACK_MAX_EMPTY_COMPLETION_RETRY_COUNT) }
+      : {}),
     mode,
     models,
     retryCount: Number.isFinite(retryCount) ? retryCount : fallbackConfig.Router.fallback.retryCount

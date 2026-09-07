@@ -72,3 +72,24 @@ test("router UI drafts read and write model selectors in slash form", () => {
 
   assert.equal(rules?.[0]?.rewrite?.value, "Zhipu/glm-5");
 });
+
+test("router fallback normalization preserves the empty-completion retry knob", () => {
+  const configured = normalizeRouterFallbackConfig({
+    emptyCompletionRetryCount: 0,
+    mode: "retry",
+    models: [],
+    retryCount: 1
+  });
+  assert.equal(configured.emptyCompletionRetryCount, 0);
+
+  const clamped = normalizeRouterFallbackConfig({
+    emptyCompletionRetryCount: 500,
+    mode: "retry",
+    models: [],
+    retryCount: 1
+  });
+  assert.equal(clamped.emptyCompletionRetryCount, 10);
+
+  const absent = normalizeRouterFallbackConfig({ mode: "retry", models: [], retryCount: 1 });
+  assert.equal(absent.emptyCompletionRetryCount, undefined);
+});

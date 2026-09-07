@@ -8,7 +8,7 @@ const config = {
   },
   mac: {
     ...baseConfig.mac,
-    identity: "-",
+    identity: "4F3827ACB90600B774BC7790D56ABC3474BD570A",
     notarize: false,
     forceCodeSigning: false
   }

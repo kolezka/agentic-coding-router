@@ -42,6 +42,7 @@ export type UsageEventInput = {
   createdAt?: string;
   credentialId?: string;
   durationMs: number;
+  estimatedPromptTokenCount?: number;
   logicalModel?: string;
   method: string;
   model?: string;
@@ -49,6 +50,7 @@ export type UsageEventInput = {
   path: string;
   provider?: string;
   pricing?: ProviderModelPricing;
+  requestBodySizeBytes?: number;
   requestId?: string;
   statusCode: number;
   usage?: UsageNumbers;
@@ -59,14 +61,20 @@ export type UsageCaptureInput = {
   client?: string;
   config?: Pick<AppConfig, "Providers" | "virtualModelProfiles">;
   durationMs: number;
+  estimatedPromptTokenCount?: number;
   fallbackModel?: string;
   method: string;
   path: string;
   providerName?: string;
   providerProtocol?: GatewayProviderProtocol;
+  requestBodySizeBytes?: number;
   requestId?: string;
   responseHeaders: Headers;
   statusCode: number;
+};
+
+export type UsageCaptureResult = {
+  measuredPromptTokenCount?: number;
 };
 
 type UsageStatsQueryOptions = {
@@ -92,6 +100,7 @@ type StoredUsageEvent = {
   createdAt: string;
   credentialId: string;
   durationMs: number;
+  estimatedPromptTokenCount?: number;
   id: number;
   inputTokens: number;
   logicalModel: string;
@@ -100,6 +109,7 @@ type StoredUsageEvent = {
   outputTokens: number;
   path: string;
   provider: string;
+  requestBodySizeBytes?: number;
   requestId: string;
   statusCode: number;
   totalTokens: number;
@@ -152,6 +162,8 @@ export class UsageStore {
     const provider = normalizeLabel(event.provider ?? route.provider, "unknown");
     const logicalModel = normalizeLabel(event.logicalModel ?? event.model, model);
     const credentialId = normalizeLabel(event.credentialId, "");
+    const requestBodySizeBytes = normalizeOptionalCount(event.requestBodySizeBytes);
+    const estimatedPromptTokenCount = normalizeOptionalCount(event.estimatedPromptTokenCount);
     const explicitCost = normalizeOptionalCost(event.costUsd);
     const estimatedCost = explicitCost === undefined
       ? await this.estimateCost({
@@ -171,6 +183,7 @@ export class UsageStore {
       ? estimatedCost?.source ?? ""
       : normalizeLabel(event.costSource, "gateway_billing");
 
+    const requestId = event.requestId ?? "";
     const statement = database.prepare(`
       INSERT INTO usage_events (
         created_at,
@@ -184,6 +197,8 @@ export class UsageStore {
         credential_id,
         status_code,
         duration_ms,
+        request_body_size_bytes,
+        estimated_prompt_token_count,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -191,12 +206,18 @@ export class UsageStore {
         total_tokens,
         cost_usd,
         cost_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE ? = '' OR NOT EXISTS (
+        SELECT 1
+        FROM usage_events
+        WHERE request_id = ?
+      )
     `);
 
-    statement.run(
+    const result = statement.run(
       event.createdAt ?? new Date().toISOString(),
-      event.requestId ?? "",
+      requestId,
       normalizeLabel(event.client, "unknown"),
       event.method,
       event.path,
@@ -206,18 +227,43 @@ export class UsageStore {
       credentialId,
       normalizeCount(event.statusCode),
       normalizeCount(event.durationMs),
+      requestBodySizeBytes ?? null,
+      estimatedPromptTokenCount ?? null,
       inputTokens,
       outputTokens,
       cacheReadTokens,
       cacheWriteTokens,
       totalTokens,
       costUsd ?? null,
-      costSource
+      costSource,
+      requestId,
+      requestId
     );
-    usageEvents.emit("recorded");
+    let metadataUpdated = false;
+    if (result.changes === 0 && requestId) {
+      // A backfill may win the insert race without the capture's prompt estimate.
+      const update = database.prepare(`
+        UPDATE usage_events
+        SET request_body_size_bytes = COALESCE(request_body_size_bytes, ?),
+            estimated_prompt_token_count = COALESCE(estimated_prompt_token_count, ?)
+        WHERE request_id = ?
+          AND ((request_body_size_bytes IS NULL AND ? IS NOT NULL)
+            OR (estimated_prompt_token_count IS NULL AND ? IS NOT NULL))
+      `).run(
+        requestBodySizeBytes ?? null,
+        estimatedPromptTokenCount ?? null,
+        requestId,
+        requestBodySizeBytes ?? null,
+        estimatedPromptTokenCount ?? null
+      );
+      metadataUpdated = update.changes > 0;
+    }
+    if (result.changes > 0 || metadataUpdated) {
+      usageEvents.emit("recorded");
+    }
   }
 
-  async recordCapture(input: UsageCaptureInput): Promise<void> {
+  async recordCapture(input: UsageCaptureInput): Promise<UsageCaptureResult> {
     const headersUsage = extractUsageFromBillingHeaders(input.responseHeaders);
     const bodyUsage = extractUsageFromBody(input.bodyText);
     // Normalize each source under its own convention before merging them: on a
@@ -248,6 +294,7 @@ export class UsageStore {
 
     await this.record({
       durationMs: input.durationMs,
+      estimatedPromptTokenCount: input.estimatedPromptTokenCount,
       method: input.method,
       logicalModel: fallbackAttribution.logicalModel ?? input.fallbackModel,
       model,
@@ -257,10 +304,16 @@ export class UsageStore {
       provider,
       pricing: providerModelPricingForUsage(input.config, provider, model),
       credentialId: readCredentialId(input.responseHeaders),
+      requestBodySizeBytes: input.requestBodySizeBytes,
       requestId: input.requestId,
       statusCode: input.statusCode,
       usage
     });
+
+    const measuredPromptTokenCount = isSuccessfulStatus(input.statusCode)
+      ? measuredPromptTokens(usage)
+      : undefined;
+    return measuredPromptTokenCount === undefined ? {} : { measuredPromptTokenCount };
   }
 
   async hasRequestId(requestId: string): Promise<boolean> {
@@ -330,6 +383,8 @@ export class UsageStore {
         credential_id TEXT NOT NULL DEFAULT '',
         status_code INTEGER NOT NULL DEFAULT 0,
         duration_ms INTEGER NOT NULL DEFAULT 0,
+        request_body_size_bytes INTEGER,
+        estimated_prompt_token_count INTEGER,
         input_tokens INTEGER NOT NULL DEFAULT 0,
         output_tokens INTEGER NOT NULL DEFAULT 0,
         cache_read_tokens INTEGER NOT NULL DEFAULT 0,
@@ -379,6 +434,14 @@ export class UsageStore {
   private backfillFromAttachedRequestLog(database: SqlDatabase, requestLogDbFile: string, since: Date): void {
     database.exec(`ATTACH DATABASE ${sqlString(requestLogDbFile)} AS request_log_source`);
     try {
+      const requestLogColumns = new Set(
+        queryRows(database, "PRAGMA request_log_source.table_info(request_logs)")
+          .map((row) => String(row.name ?? ""))
+          .filter(Boolean)
+      );
+      const requestBodySize = requestLogColumns.has("request_body_size_bytes")
+        ? "logs.request_body_size_bytes"
+        : "NULL";
       database.prepare(`
           INSERT INTO usage_events (
             created_at,
@@ -392,6 +455,8 @@ export class UsageStore {
             credential_id,
             status_code,
             duration_ms,
+            request_body_size_bytes,
+            estimated_prompt_token_count,
             input_tokens,
             output_tokens,
             cache_read_tokens,
@@ -412,6 +477,8 @@ export class UsageStore {
             logs.credential_id,
             logs.status_code,
             logs.duration_ms,
+            ${requestBodySize},
+            NULL,
             logs.input_tokens,
             logs.output_tokens,
             logs.cache_read_tokens,
@@ -459,22 +526,23 @@ function ensureUsageSchema(database: SqlDatabase): void {
       .filter(Boolean)
   );
 
-  if (!columns.has("client")) {
-    database.exec("ALTER TABLE usage_events ADD COLUMN client TEXT NOT NULL DEFAULT 'unknown'");
-  }
-  if (!columns.has("cost_usd")) {
-    database.exec("ALTER TABLE usage_events ADD COLUMN cost_usd REAL");
-  }
-  if (!columns.has("cost_source")) {
-    database.exec("ALTER TABLE usage_events ADD COLUMN cost_source TEXT NOT NULL DEFAULT ''");
-  }
+  const addColumn = (name: string, definition: string) => {
+    if (!columns.has(name)) {
+      database.exec(`ALTER TABLE usage_events ADD COLUMN ${name} ${definition}`);
+      columns.add(name);
+    }
+  };
+
+  addColumn("client", "TEXT NOT NULL DEFAULT 'unknown'");
+  addColumn("cost_usd", "REAL");
+  addColumn("cost_source", "TEXT NOT NULL DEFAULT ''");
   if (!columns.has("logical_model")) {
-    database.exec("ALTER TABLE usage_events ADD COLUMN logical_model TEXT NOT NULL DEFAULT ''");
+    addColumn("logical_model", "TEXT NOT NULL DEFAULT ''");
     database.exec("UPDATE usage_events SET logical_model = model WHERE logical_model = ''");
   }
-  if (!columns.has("credential_id")) {
-    database.exec("ALTER TABLE usage_events ADD COLUMN credential_id TEXT NOT NULL DEFAULT ''");
-  }
+  addColumn("credential_id", "TEXT NOT NULL DEFAULT ''");
+  addColumn("request_body_size_bytes", "INTEGER");
+  addColumn("estimated_prompt_token_count", "INTEGER");
   database.exec("CREATE INDEX IF NOT EXISTS usage_events_client_idx ON usage_events(client)");
   database.exec("CREATE INDEX IF NOT EXISTS usage_events_created_at_idx ON usage_events(created_at)");
   database.exec("CREATE INDEX IF NOT EXISTS usage_events_credential_id_idx ON usage_events(credential_id)");
@@ -514,11 +582,12 @@ export async function getUsageTotalsSince(since: Date, filter?: UsageStatsFilter
   }
 }
 
-export async function recordGatewayUsageCapture(input: UsageCaptureInput): Promise<void> {
+export async function recordGatewayUsageCapture(input: UsageCaptureInput): Promise<UsageCaptureResult | undefined> {
   try {
-    await usageStore.recordCapture(input);
+    return await usageStore.recordCapture(input);
   } catch (error) {
     console.warn(`[usage] Failed to record usage: ${formatError(error)}`);
+    return undefined;
   }
 }
 
@@ -631,6 +700,7 @@ function toStoredUsageEvent(row: Record<string, SqlValue>): StoredUsageEvent {
     createdAt: String(row.created_at ?? ""),
     credentialId: normalizeLabel(String(row.credential_id ?? ""), ""),
     durationMs: normalizeCount(row.duration_ms),
+    estimatedPromptTokenCount: asNumber(row.estimated_prompt_token_count),
     id: normalizeCount(row.id),
     inputTokens: normalizeCount(row.input_tokens),
     logicalModel: normalizeLabel(String(row.logical_model ?? row.model ?? ""), "unknown"),
@@ -639,6 +709,7 @@ function toStoredUsageEvent(row: Record<string, SqlValue>): StoredUsageEvent {
     outputTokens: normalizeCount(row.output_tokens),
     path: normalizeLabel(String(row.path ?? ""), "/"),
     provider: normalizeLabel(String(row.provider ?? ""), "unknown"),
+    requestBodySizeBytes: asNumber(row.request_body_size_bytes),
     requestId: String(row.request_id ?? ""),
     statusCode: normalizeCount(row.status_code),
     totalTokens: normalizeCount(row.total_tokens)
@@ -821,6 +892,8 @@ function readRecentRequestRows(database: SqlDatabase, query: UsageWhereClause): 
         credential_id,
         status_code,
         duration_ms,
+        request_body_size_bytes,
+        estimated_prompt_token_count,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -917,12 +990,15 @@ function buildRecentRequestRows(events: StoredUsageEvent[]): UsageComparisonRow[
     caption: `${formatRequestTime(event.createdAt)} · ${event.client} · ${event.path} · ${event.statusCode}`,
     client: event.client,
     credentialId: event.credentialId || undefined,
+    ...(event.estimatedPromptTokenCount === undefined ? {} : { estimatedPromptTokenCount: event.estimatedPromptTokenCount }),
     key: String(event.id),
     label: event.model || "unknown",
     logicalModel: event.logicalModel,
     maxShare: 0,
     model: event.model,
-    provider: event.provider
+    provider: event.provider,
+    ...(event.requestBodySizeBytes === undefined ? {} : { requestBodySizeBytes: event.requestBodySizeBytes }),
+    ...(event.requestId ? { requestId: event.requestId } : {})
   }));
 
   return applyMaxShare(rows, (row) => row.totalTokens || row.avgDurationMs || 1);
@@ -966,6 +1042,17 @@ function buildTotals(events: StoredUsageEvent[]): UsageTotals {
     successRate: successfulRequests / requestCount,
     totalTokens
   };
+}
+
+function measuredPromptTokens(usage: UsageNumbers | undefined): number | undefined {
+  if (!usage || [usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens].every((value) => value === undefined)) {
+    return undefined;
+  }
+  return normalizeCount(usage.inputTokens) + normalizeCount(usage.cacheReadTokens) + normalizeCount(usage.cacheWriteTokens);
+}
+
+function isSuccessfulStatus(statusCode: number): boolean {
+  return statusCode >= 200 && statusCode < 400;
 }
 
 function promptTokenCount(event: StoredUsageEvent): number {
@@ -1188,6 +1275,10 @@ function asNumber(value: unknown): number | undefined {
 
 function normalizeCount(value: unknown): number {
   return asNumber(value) ?? 0;
+}
+
+function normalizeOptionalCount(value: unknown): number | undefined {
+  return asNumber(value);
 }
 
 function normalizeCost(value: unknown): number {

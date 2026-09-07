@@ -4,6 +4,7 @@ import {
   DEFAULT_TRAY_COMPONENT_VARIANTS,
   DEFAULT_TRAY_WIDGETS,
   DEFAULT_TRAY_WINDOW_MODULES,
+  ROUTER_FALLBACK_DEFAULT_EMPTY_COMPLETION_RETRY_COUNT,
   type AppConfig,
   type ProxyRouteTarget
 } from "@ccr/core/contracts/app";
@@ -42,6 +43,7 @@ export function createDefaultAppConfig(options: DefaultAppConfigOptions = {}): A
         }
       },
       fallback: {
+        emptyCompletionRetryCount: ROUTER_FALLBACK_DEFAULT_EMPTY_COMPLETION_RETRY_COUNT,
         mode: "off",
         models: [],
         retryCount: 1

@@ -19,11 +19,14 @@ import { resolveGatewayPublicModelId } from "@ccr/core/gateway/features/model-di
 import { activeProviderCredentials, findProviderByPublicOrInternalName, findProviderCredentialBySlug, normalizedProviderCapabilities, parseProviderCredentialInternalName, providerCapabilityForClientProtocol, providerCapabilityInternalName, providerCapabilityNameMatches, providerCredentialInternalName, providerCredentialPriority, providerCredentialRuntimeId, providerCredentialSlug, providerProtocolForClientProtocol, sanitizeHeaderValue } from "@ccr/core/providers/runtime-topology";
 import { delay } from "@ccr/core/gateway/internal/clock";
 import { retryDelayAfterNetworkError, retryDelayAfterStatus, shouldFallbackAfterStatus } from "@ccr/core/gateway/upstream/retry-policy";
+import { emptyCompletionFailureResponse, emptyCompletionGuardOverflowResponse, emptyCompletionRetryCountForFallback, emptyCompletionRetryDelayMs, inspectUpstreamEmptyCompletion } from "@ccr/core/gateway/upstream/empty-completion";
 import { claudeCodeOauthBetaHeader, claudeCodeOauthRequiredBeta, UpstreamRequestError } from "@ccr/core/gateway/internal/shared";
 import type { ApiKeyLimitUsage, ProviderCredentialRoutingTarget, UpstreamAttempt, UpstreamFailedAttempt, UpstreamFetchResult } from "@ccr/core/gateway/internal/shared";
 import type { RouteTraceObserver } from "@ccr/core/observability/route-trace";
 
 const providerCredentialSpilloverThreshold = 0.8;
+const emptyCompletionFailureReason = "upstream returned an empty completion";
+const emptyCompletionGuardOverflowReason = "upstream stream exceeded the empty-completion guard buffer";
 const openRouterDiscountModelHeader = "x-ccr-openrouter-discount-model";
 const openRouterDiscountProviderHeader = "x-ccr-openrouter-discount-provider-id";
 
@@ -311,6 +314,12 @@ export async function fetchUpstreamWithFallback(input: {
     planningRouting.routedModel
   );
   const failedAttempts: UpstreamFailedAttempt[] = [];
+  const emptyCompletionBudgets = new Map<string, { dispatches: number; retries: number }>();
+  let attemptNumber = 0;
+  // Backoff for ordinary status and network failures keeps its own counter so
+  // empty-completion retries cannot inflate it.
+  let statusFailureCount = 0;
+  const emptyCompletionRetryCount = emptyCompletionRetryCountForFallback(planningRouting.fallback);
   const attemptRoutingCache = new Map<string | undefined, {
     body?: Buffer;
     headers: Record<string, string>;
@@ -351,7 +360,7 @@ export async function fetchUpstreamWithFallback(input: {
       });
     }
 
-    const attemptNumber = index + 1;
+    attemptNumber += 1;
     const plannedAttempt = attempts[index];
     const capabilityRoutingStartedAt = Date.now();
     let cachedAttemptRouting = attemptRoutingCache.get(plannedAttempt.model);
@@ -467,15 +476,123 @@ export async function fetchUpstreamWithFallback(input: {
     releaseJsonObject(input.body);
 
     try {
-      const response = await fetchWithSystemProxy(attemptUrl, {
-        body: shouldSendBody(input.method) ? attempt.body?.toString("utf8") : undefined,
-        headers: upstreamHeaders,
-        method: input.method,
-        signal: input.signal
-      });
+      const budgetKey = JSON.stringify([attemptProvider, attempt.model, attemptUrl]);
+      const budget = emptyCompletionBudgets.get(budgetKey) ?? { dispatches: 0, retries: 0 };
+      emptyCompletionBudgets.set(budgetKey, budget);
+      const dispatchAttempt = async (): Promise<Response> => {
+        budget.dispatches += 1;
+        return await fetchWithSystemProxy(attemptUrl, {
+          body: shouldSendBody(input.method) ? attempt.body?.toString("utf8") : undefined,
+          headers: { ...upstreamHeaders, "x-ccr-route-attempt": String(attemptNumber) },
+          method: input.method,
+          signal: input.signal
+        });
+      };
+      const attemptProtocol = attempt.targetProtocol ?? attempt.credentialProtocol;
+
+      let response = await dispatchAttempt();
+      let emptyCompletion = await inspectUpstreamEmptyCompletion({ protocol: attemptProtocol, response });
+
+      // Keep this budget across ordinary fallback attempts at the same target.
+      while (emptyCompletion.kind === "empty" && budget.retries < emptyCompletionRetryCount) {
+        const emptyRetryDelayMs = emptyCompletionRetryDelayMs(budget.retries);
+        budget.retries += 1;
+        recordProviderCredentialOutcome(input.config, input.method, attempt, emptyCompletion.status, emptyCompletion.headers, {
+          attemptCount: budget.dispatches,
+          kind: "empty_completion"
+        });
+        captureEmptyCompletionOutcome({
+          attemptNumber,
+          attemptProvider,
+          attemptStartedAt,
+          model: attempt.model,
+          retryDelayMs: emptyRetryDelayMs,
+          statusCode: emptyCompletion.status,
+          trace: input.trace
+        });
+        failedAttempts.push({
+          credentialChain: attempt.credentialChain,
+          credentialIds: attempt.credentialIds,
+          delayMs: emptyRetryDelayMs,
+          error: emptyCompletionFailureReason,
+          model: attempt.model,
+          statusCode: emptyCompletion.status
+        });
+        await delay(emptyRetryDelayMs, input.signal);
+        if (input.signal?.aborted) {
+          throw new UpstreamRequestError(abortSignalMessage(input.signal), {
+            attempt,
+            failedAttempts
+          });
+        }
+        attemptNumber += 1;
+        response = await dispatchAttempt();
+        emptyCompletion = await inspectUpstreamEmptyCompletion({ protocol: attemptProtocol, response });
+      }
+
+      if (emptyCompletion.kind === "overflow") {
+        captureEmptyCompletionOutcome({
+          attemptNumber,
+          attemptProvider,
+          attemptStartedAt,
+          error: emptyCompletionGuardOverflowReason,
+          fallbackReason: "empty-completion-guard-overflow",
+          model: attempt.model,
+          statusCode: 502,
+          trace: input.trace
+        });
+        return {
+          attempt,
+          failedAttempts,
+          response: emptyCompletionGuardOverflowResponse(emptyCompletion.headers)
+        };
+      }
+
+      if (emptyCompletion.kind === "empty") {
+        // The dedicated budget is spent. Only a genuinely different target is
+        // worth another dispatch; the generic same-target retries must not be
+        // spent on a failure that already had its own budget.
+        const differentTargetIndex = nextDifferentTargetIndex(attempts, index);
+        captureEmptyCompletionOutcome({
+          attemptNumber,
+          attemptProvider,
+          attemptStartedAt,
+          fallbackReason: differentTargetIndex === undefined ? undefined : "empty-completion",
+          model: attempt.model,
+          statusCode: emptyCompletion.status,
+          trace: input.trace
+        });
+        if (differentTargetIndex !== undefined) {
+          recordProviderCredentialOutcome(input.config, input.method, attempt, emptyCompletion.status, emptyCompletion.headers, {
+            attemptCount: budget.dispatches,
+            kind: "empty_completion"
+          });
+          failedAttempts.push({
+            credentialChain: attempt.credentialChain,
+            credentialIds: attempt.credentialIds,
+            error: emptyCompletionFailureReason,
+            model: attempt.model,
+            statusCode: emptyCompletion.status
+          });
+          index = differentTargetIndex - 1;
+          continue;
+        }
+        return {
+          attempt,
+          failedAttempts,
+          failure: { attemptCount: budget.dispatches, kind: "empty_completion" },
+          response: emptyCompletionFailureResponse({
+            attemptCount: budget.dispatches,
+            errorBody: emptyCompletion.errorBody,
+            headers: emptyCompletion.headers
+          })
+        };
+      }
+
+      response = emptyCompletion.response;
 
       if (hasNextAttempt && shouldFallbackAfterStatus(response.status, fallbackMode)) {
-        const delayMs = retryDelayAfterStatus(response.headers, failedAttempts.length);
+        const delayMs = retryDelayAfterStatus(response.headers, statusFailureCount);
         input.trace?.capture({
           attempt: attemptNumber,
           durationMs: Date.now() - attemptStartedAt,
@@ -501,6 +618,7 @@ export async function fetchUpstreamWithFallback(input: {
           model: attempt.model,
           statusCode: response.status
         });
+        statusFailureCount += 1;
         recordProviderCredentialOutcome(input.config, input.method, attempt, response.status, response.headers);
         await drainResponseBody(response);
         if (delayMs > 0) {
@@ -532,7 +650,7 @@ export async function fetchUpstreamWithFallback(input: {
     } catch (error) {
       const message = formatError(error);
       const delayMs = hasNextAttempt && !input.signal?.aborted
-        ? retryDelayAfterNetworkError(failedAttempts.length)
+        ? retryDelayAfterNetworkError(statusFailureCount)
         : 0;
       input.trace?.capture({
         attempt: attemptNumber,
@@ -558,6 +676,7 @@ export async function fetchUpstreamWithFallback(input: {
         error: message,
         model: attempt.model
       });
+      statusFailureCount += 1;
       if (input.signal?.aborted) {
         throw new UpstreamRequestError(abortSignalMessage(input.signal), {
           attempt,
@@ -611,6 +730,7 @@ function prepareUpstreamCredentialAttempt(input: {
   }
 
   const attemptHeaders = withClaudeCodeOauthBetaHeader(input.headers, input.config, target);
+  const targetProtocol = target.protocol;
 
   const credentials = activeProviderCredentials(target.provider);
   if (credentials.length === 0) {
@@ -627,7 +747,8 @@ function prepareUpstreamCredentialAttempt(input: {
       body: attemptBody(preserveModelSelector ? input.attempt.body : providerQualifiedTargetBody ?? targetBody),
       headers: preserveModelSelector
         ? clearTargetProviderHeaders(attemptHeaders)
-        : targetHeaders
+        : targetHeaders,
+      targetProtocol
     };
   }
 
@@ -640,7 +761,8 @@ function prepareUpstreamCredentialAttempt(input: {
       body: attemptBody(preserveModelSelector ? input.attempt.body : target.body ?? normalizedBody?.body ?? input.attempt.body),
       headers: preserveModelSelector
         ? clearTargetProviderHeaders(attemptHeaders)
-        : targetProviderFallbackHeaders(attemptHeaders, target.provider, target.protocol)
+        : targetProviderFallbackHeaders(attemptHeaders, target.provider, target.protocol),
+      targetProtocol
     };
   }
 
@@ -662,7 +784,8 @@ function prepareUpstreamCredentialAttempt(input: {
     credentialIds: selection.credentials.map((candidate) => candidate.credentialId),
     credentialProtocol: target.protocol,
     headers,
-    logicalProvider: target.provider.name
+    logicalProvider: target.provider.name,
+    targetProtocol
   };
 }
 
@@ -1073,6 +1196,52 @@ function sortProviderCredentialCandidates<T extends {
   }
 
   return prioritySorted;
+}
+
+
+function nextDifferentTargetIndex(attempts: UpstreamAttempt[], index: number): number | undefined {
+  const currentModel = attempts[index]?.model;
+  for (let next = index + 1; next < attempts.length; next += 1) {
+    if (attempts[next].model !== currentModel) {
+      return next;
+    }
+  }
+  return undefined;
+}
+
+
+function captureEmptyCompletionOutcome(input: {
+  attemptNumber: number;
+  attemptProvider?: string;
+  attemptStartedAt: number;
+  error?: string;
+  fallbackReason?: string;
+  model?: string;
+  retryDelayMs?: number;
+  statusCode: number;
+  trace?: RouteTraceObserver;
+}): void {
+  input.trace?.capture({
+    attempt: input.attemptNumber,
+    durationMs: Date.now() - input.attemptStartedAt,
+    kind: "outcome",
+    name: "upstream.attempt.outcome",
+    outcome: {
+      error: input.error ?? emptyCompletionFailureReason,
+      ...(input.fallbackReason === undefined && input.retryDelayMs === undefined
+        ? {}
+        : { fallbackReason: input.fallbackReason ?? "empty-completion" }),
+      ...(input.retryDelayMs === undefined ? {} : { retryDelayMs: input.retryDelayMs }),
+      statusCode: input.statusCode
+    },
+    phase: "outcome",
+    startedAtMs: input.attemptStartedAt,
+    status: "error",
+    target: {
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.attemptProvider ? { provider: input.attemptProvider } : {})
+    }
+  });
 }
 
 

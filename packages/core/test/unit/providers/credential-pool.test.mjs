@@ -61,3 +61,25 @@ test("upstream credential response identity takes precedence over the planned ch
   recordProviderCredentialOutcome(config, "POST", attempt, 200, headers);
   assert.equal(readProviderCredentialCooldown(provider, second), undefined);
 });
+
+test("a verified empty-completion failure keeps the credential usable", () => {
+  const { attempt, config, first, provider } = fixture();
+
+  recordProviderCredentialOutcome(config, "POST", attempt, 502, new Headers(), {
+    attemptCount: 3,
+    kind: "empty_completion"
+  });
+
+  assert.equal(readProviderCredentialCooldown(provider, first), undefined);
+});
+
+test("a 502 the executor did not verify as an empty completion still cools the credential down", () => {
+  const { attempt, config, first, provider } = fixture();
+  // Response headers are upstream-controlled: only the executor's typed result
+  // may exempt a credential, never a header claiming the failure was empty.
+  const headers = new Headers({ "x-ccr-empty-completion": "true" });
+
+  recordProviderCredentialOutcome(config, "POST", attempt, 502, headers);
+
+  assert.equal(readProviderCredentialCooldown(provider, first)?.reason, "HTTP 502");
+});

@@ -5,6 +5,7 @@ import {
   type ApiKeyLimitUsage,
   type UpstreamAttempt
 } from "@ccr/core/gateway/internal/shared";
+import type { EmptyCompletionFailure } from "@ccr/core/gateway/upstream/empty-completion";
 import {
   findProviderByPublicOrInternalName,
   findProviderCredentialByRuntimeId,
@@ -13,6 +14,7 @@ import {
   providerCredentialRuntimeId
 } from "@ccr/core/providers/runtime-topology";
 
+// A lone cooled-down credential stays selectable, so it needs no shorter cooldown.
 const providerCredentialCooldownMs = 60_000;
 const providerCredentialCooldowns = new Map<string, { reason: string; until: number }>();
 
@@ -41,7 +43,8 @@ export function recordProviderCredentialOutcome(
   method: string,
   attempt: UpstreamAttempt,
   statusCode: number,
-  responseHeaders: Headers
+  responseHeaders: Headers,
+  failure?: EmptyCompletionFailure
 ): void {
   if (!attempt.logicalProvider || !attempt.credentialProtocol || !attempt.credentialChain?.length) return;
   const provider = findProviderByPublicOrInternalName(config, attempt.logicalProvider);
@@ -54,6 +57,11 @@ export function recordProviderCredentialOutcome(
   const credential = responseCredential ?? providerCredentialFromInternalName(provider, attempt.credentialChain[0]);
   if (!credential) return;
 
+  if (failure?.kind === "empty_completion") {
+    // The executor verified a model-output failure, not a credential failure.
+    incrementProviderCredentialCounters(provider, credential, estimateLimitUsage(method, attempt.body ?? Buffer.alloc(0)));
+    return;
+  }
   if (statusCode >= 200 && statusCode < 500 && statusCode !== 401 && statusCode !== 403 && statusCode !== 429) {
     incrementProviderCredentialCounters(provider, credential, estimateLimitUsage(method, attempt.body ?? Buffer.alloc(0)));
     clearProviderCredentialCooldown(provider, credential);
