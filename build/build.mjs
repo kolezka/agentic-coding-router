@@ -1,21 +1,16 @@
-import { buildBrowserRenderer, buildMain, buildRenderer, buildRequestLogBodyWorker, buildStyles, buildTrayRenderer, buildWebClientBridge, cleanDist, copyAppAssets, copyBrowserRendererHtml, copyBundledClaudeRuntimePlugins, copyModelCatalog, copyRendererHtml, copyTrayRendererHtml, syncUiRendererToRuntimeDists } from "./esbuild.config.mjs";
+import { buildCli, buildCoreServer, buildRenderer, buildRequestLogBodyWorker, buildStyles, buildWebClientBridge, cleanDist, copyModelCatalog, copyRendererHtml, syncUiRendererToRuntimeDists } from "./esbuild.config.mjs";
 
 const mode = process.argv.includes("--dev") ? "development" : "production";
 
 cleanDist();
-copyAppAssets();
-copyBundledClaudeRuntimePlugins();
 copyModelCatalog();
-copyBrowserRendererHtml();
 copyRendererHtml();
-copyTrayRendererHtml();
 
 await Promise.all([
-  buildMain({ mode }),
-  buildBrowserRenderer({ mode }),
+  buildCli({ mode }),
+  buildCoreServer({ mode }),
   buildRenderer({ mode }),
   buildRequestLogBodyWorker({ mode }),
-  buildTrayRenderer({ mode }),
   buildWebClientBridge({ mode }),
   buildStyles({ minify: mode === "production" })
 ]);

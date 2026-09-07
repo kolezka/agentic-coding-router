@@ -1,48 +1,26 @@
-import electron from "electron";
 import esbuild from "esbuild";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   buildStyles,
   cleanDist,
-  browserRendererHtmlInput,
-  cliSourceRoot,
   coreSourceRoot,
-  copyAppAssets,
-  copyBrowserRendererHtml,
-  copyBundledClaudeRuntimePlugins,
-  copyCliRuntimeToElectronDist,
   copyModelCatalog,
   copyRendererHtml,
-  copyTrayRendererHtml,
   createRequestLogBodyWorkerBuildOptions,
-  createBrowserRendererBuildOptions,
   createCliBuildOptions,
-  createMainBuildOptions,
   createRendererBuildOptions,
-  createTrayRendererBuildOptions,
   createWebClientBridgeBuildOptions,
-  appAssetsInput,
-  bundledClaudeRuntimePluginsInputDir,
   modelCatalogInput,
   projectRoot,
   rendererRoot,
   rendererHtmlInput,
   syncUiRendererToRuntimeDists,
-  trayRendererHtmlInput,
   watchPlugin
 } from "./esbuild.config.mjs";
 
-let electronProcess = null;
-let restartTimer = null;
-let restartInFlight = false;
-let restartQueued = false;
-let pendingRestartReasons = [];
 const watchSignatures = new Map();
-let shuttingDown = false;
-const restartDelayMs = 160;
 const styleBuildDelayMs = 160;
 const stylePollIntervalMs = 1000;
 const ignoredSignatureEntries = new Set([".DS_Store"]);
@@ -50,39 +28,33 @@ let styleBuildTimer = null;
 let styleBuildInFlight = false;
 let queuedStyleBuildReason = null;
 const ready = {
-  browser: false,
   cli: false,
   logWorker: false,
-  main: false,
   renderer: false,
-  tray: false,
   webBridge: false
 };
 const devTarget = parseDevTarget(process.argv.slice(2));
 const enabled = {
-  cli: devTarget === "cli" || devTarget === "electron",
-  electron: devTarget === "electron",
+  cli: devTarget === "cli",
   ui: true
 };
 const coreSharedSourceRoot = path.join(coreSourceRoot, "shared");
 const styleWatchRoots = [rendererRoot, coreSharedSourceRoot].filter((watchRoot) => existsSync(watchRoot));
 const activeReadyNames = new Set([
-  ...(enabled.ui ? ["browser", "renderer", "tray", "webBridge"] : []),
-  ...(enabled.ui ? ["logWorker"] : []),
-  ...(enabled.cli ? ["cli"] : []),
-  ...(enabled.electron ? ["main"] : [])
+  ...(enabled.ui ? ["renderer", "webBridge", "logWorker"] : []),
+  ...(enabled.cli ? ["cli"] : [])
 ]);
 
 function parseDevTarget(args) {
-  const target = args[0] ?? "electron";
+  const target = args[0] ?? "cli";
   if (target === "--help" || target === "-h") {
-    console.log("Usage: node build/dev.mjs [ui|cli|electron]");
+    console.log("Usage: node build/dev.mjs [ui|cli]");
     process.exit(0);
   }
-  if (target === "ui" || target === "cli" || target === "electron") {
+  if (target === "ui" || target === "cli") {
     return target;
   }
-  console.error(`Unknown dev target "${target}". Expected ui, cli, or electron.`);
+  console.error(`Unknown dev target "${target}". Expected ui or cli.`);
   process.exit(2);
 }
 
@@ -207,9 +179,6 @@ async function rebuildStyles(reason) {
     logDev(`rebuilding styles: ${reason}`);
     await buildStyles({ minify: false });
     syncUiRendererToRuntimeDists();
-    if (enabled.electron) {
-      scheduleRestart(`styles rebuilt: ${reason}`);
-    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logDev(`style rebuild failed: ${message}`);
@@ -251,9 +220,6 @@ function pollWatchedInput(label, targetPath, onChange, options = {}) {
   logDev(`watch event: ${label} ${relativePath(targetPath)}; ${signature.summary}; content=changed`);
   try {
     onChange();
-    if (enabled.electron && options.restart !== false) {
-      scheduleRestart(label);
-    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logDev(`watch action failed: ${label}; ${message}`);
@@ -280,151 +246,32 @@ function pollSourceWatchTargets() {
     copyRendererHtml();
     syncUiRendererToRuntimeDists();
   });
-  pollWatchedInput("browser html", browserRendererHtmlInput, () => {
-    copyBrowserRendererHtml();
-    syncUiRendererToRuntimeDists();
-  });
-  pollWatchedInput("tray html", trayRendererHtmlInput, () => {
-    copyTrayRendererHtml();
-    syncUiRendererToRuntimeDists();
-  });
-  if (enabled.electron) {
-    pollWatchedInput("app assets", appAssetsInput, copyAppAssets);
-    pollWatchedInput("bundled Claude runtime plugins", bundledClaudeRuntimePluginsInputDir, copyBundledClaudeRuntimePlugins);
-  }
-  if ((enabled.cli || enabled.electron) && existsSync(modelCatalogInput)) {
+  if (enabled.cli && existsSync(modelCatalogInput)) {
     pollWatchedInput("model catalog", modelCatalogInput, copyModelCatalog, { metadataOnly: true });
   }
 }
 
 function markReady(name, reason = `${name} esbuild completed`) {
-  if (name === "browser" || name === "cli" || name === "logWorker" || name === "main" || name === "renderer" || name === "tray" || name === "webBridge") {
+  if (name === "cli" || name === "logWorker" || name === "renderer" || name === "webBridge") {
     ready[name] = true;
   }
   logDev(`build ready: ${reason}; ${readyState()}`);
-  if (enabled.electron && Array.from(activeReadyNames).every((readyName) => ready[readyName])) {
-    scheduleRestart(reason);
-  }
 }
 
-function scheduleRestart(reason = "unknown trigger") {
-  if (shuttingDown) {
-    logDev(`restart ignored during shutdown: ${reason}`);
-    return;
-  }
-  pendingRestartReasons.push(reason);
-  if (restartTimer) {
-    clearTimeout(restartTimer);
-    logDev(`restart rescheduled in ${restartDelayMs}ms: ${reason}`);
-  } else {
-    logDev(`restart scheduled in ${restartDelayMs}ms: ${reason}`);
-  }
-  restartTimer = setTimeout(restartElectron, restartDelayMs);
-}
-
-async function restartElectron() {
-  if (restartInFlight) {
-    restartQueued = true;
-    return;
-  }
-  restartInFlight = true;
-  const reasons = Array.from(new Set(pendingRestartReasons));
-  pendingRestartReasons = [];
-  restartTimer = null;
-
-  try {
-    if (electronProcess) {
-      await stopElectron(electronProcess);
-    }
-
-    if (shuttingDown) {
-      return;
-    }
-    logDev(`starting Electron; reasons=${reasons.join(" | ") || "initial start"}`);
-    const child = spawn(electron, ["."], {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        NODE_ENV: "development"
-      },
-      stdio: "inherit"
-    });
-    electronProcess = child;
-    logDev(`Electron started pid=${child.pid ?? "unknown"}`);
-    child.on("exit", (code, signal) => {
-      logDev(`Electron exited pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`);
-      if (electronProcess === child) {
-        electronProcess = null;
-      }
-    });
-  } finally {
-    restartInFlight = false;
-    if (restartQueued || pendingRestartReasons.length > 0) {
-      restartQueued = false;
-      scheduleRestart("changes queued during Electron restart");
-    }
-  }
-}
-
-async function stopElectron(child) {
-  logDev(`stopping Electron pid=${child.pid ?? "unknown"}`);
-  if (child.exitCode !== null || child.signalCode !== null) {
-    if (electronProcess === child) {
-      electronProcess = null;
-    }
-    return;
-  }
-
-  await new Promise((resolve) => {
-    let forceTimer = null;
-    let giveUpTimer = null;
-    const finish = () => {
-      if (forceTimer) clearTimeout(forceTimer);
-      if (giveUpTimer) clearTimeout(giveUpTimer);
-      child.off("exit", finish);
-      resolve();
-    };
-    child.once("exit", finish);
-    child.kill();
-    forceTimer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) {
-        logDev(`force stopping Electron pid=${child.pid ?? "unknown"}`);
-        child.kill("SIGKILL");
-      }
-    }, 2_000);
-    giveUpTimer = setTimeout(finish, 5_000);
-  });
-  if (electronProcess === child) {
-    electronProcess = null;
-  }
-}
-
-logDev(`starting dev build target=${devTarget} ui=${enabled.ui ? "on" : "off"} cli=${enabled.cli ? "on" : "off"} electron=${enabled.electron ? "on" : "off"}`);
+logDev(`starting dev build target=${devTarget} ui=${enabled.ui ? "on" : "off"} cli=${enabled.cli ? "on" : "off"}`);
 cleanDist();
-if (enabled.electron) {
-  copyAppAssets();
-  copyBundledClaudeRuntimePlugins();
-}
-if (enabled.cli || enabled.electron) {
+if (enabled.cli) {
   copyModelCatalog();
 }
-copyBrowserRendererHtml();
 copyRendererHtml();
-copyTrayRendererHtml();
 await buildStyles({ minify: false });
 syncUiRendererToRuntimeDists();
 
 rememberWatchSignature("home html", rendererHtmlInput);
-rememberWatchSignature("browser html", browserRendererHtmlInput);
-rememberWatchSignature("tray html", trayRendererHtmlInput);
 for (const styleWatchRoot of styleWatchRoots) {
   rememberWatchSignature(`styles ${relativePath(styleWatchRoot)}`, styleWatchRoot);
 }
-if (enabled.electron) {
-  rememberWatchSignature("app assets", appAssetsInput);
-  rememberWatchSignature("bundled Claude runtime plugins", bundledClaudeRuntimePluginsInputDir);
-}
-if ((enabled.cli || enabled.electron) && existsSync(modelCatalogInput)) {
+if (enabled.cli && existsSync(modelCatalogInput)) {
   rememberWatchSignature("model catalog", modelCatalogInput, { metadataOnly: true });
 }
 
@@ -435,30 +282,12 @@ const sourcePoller = setInterval(() => {
 
 const contexts = [];
 
-if (enabled.electron) {
-  contexts.push(
-    await esbuild.context(
-      createMainBuildOptions({
-        mode: "development",
-        plugins: [watchPlugin("main", (name) => markReady(name))]
-      })
-    )
-  );
-}
-
 if (enabled.cli) {
   contexts.push(
     await esbuild.context(
       createCliBuildOptions({
         mode: "development",
-        plugins: [
-          watchPlugin("cli", (name) => {
-            if (enabled.electron) {
-              copyCliRuntimeToElectronDist();
-            }
-            markReady(name);
-          })
-        ]
+        plugins: [watchPlugin("cli", (name) => markReady(name))]
       })
     )
   );
@@ -472,30 +301,6 @@ if (enabled.ui) {
         plugins: [
           watchPlugin("renderer", (name) => {
             copyRendererHtml();
-            syncUiRendererToRuntimeDists();
-            markReady(name);
-          })
-        ]
-      })
-    ),
-    await esbuild.context(
-      createTrayRendererBuildOptions({
-        mode: "development",
-        plugins: [
-          watchPlugin("tray", (name) => {
-            copyTrayRendererHtml();
-            syncUiRendererToRuntimeDists();
-            markReady(name);
-          })
-        ]
-      })
-    ),
-    await esbuild.context(
-      createBrowserRendererBuildOptions({
-        mode: "development",
-        plugins: [
-          watchPlugin("browser", (name) => {
-            copyBrowserRendererHtml();
             syncUiRendererToRuntimeDists();
             markReady(name);
           })
@@ -532,13 +337,6 @@ logDev("watchers are active");
 
 async function shutdown() {
   logDev("shutting down dev build");
-  shuttingDown = true;
-  if (restartTimer) {
-    clearTimeout(restartTimer);
-  }
-  if (electronProcess) {
-    await stopElectron(electronProcess);
-  }
   if (styleBuildTimer) {
     clearTimeout(styleBuildTimer);
   }

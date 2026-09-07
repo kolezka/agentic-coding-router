@@ -165,7 +165,6 @@ export function bundledToolHubMcpEntryPathCandidates(): string[] {
     ...(process.env.NODE_TEST_CONTEXT
       ? [pathJoin(process.cwd(), ".test-dist", "core", "runtime", TOOL_HUB_MCP_RUNTIME_FILE_NAME)]
       : []),
-    pathJoin(process.cwd(), "packages", "electron", "dist", "main", TOOL_HUB_MCP_RUNTIME_FILE_NAME),
     pathJoin(process.cwd(), "packages", "cli", "dist", "main", TOOL_HUB_MCP_RUNTIME_FILE_NAME),
     pathJoin(process.cwd(), "packages", "core", "dist", "main", TOOL_HUB_MCP_RUNTIME_FILE_NAME),
     pathJoin(process.cwd(), "dist", "main", TOOL_HUB_MCP_RUNTIME_FILE_NAME)

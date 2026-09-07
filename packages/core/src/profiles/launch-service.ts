@@ -30,7 +30,6 @@ export const desktopCliCommandName = "ccr-app";
 const desktopCliRuntimeFileName = "ccr-cli.js";
 const desktopCliCommandNameEnv = "CCR_CLI_COMMAND_NAME";
 export const CCR_CLI_COMPANION_RUNTIME_FILE_NAMES = [
-  "browser-web-search-proxy-mcp.js",
   "fusion-tool-fallback-mcp.js",
   "fusion-vision-mcp.js",
   "gateway-bootstrap.js",

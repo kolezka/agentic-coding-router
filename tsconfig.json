@@ -20,7 +20,6 @@
       "@/*": ["./packages/ui/src/*"],
       "@ccr/cli/*": ["./packages/cli/src/*"],
       "@ccr/core/*": ["./packages/core/src/*"],
-      "@ccr/electron/*": ["./packages/electron/src/*"],
       "@ccr/ui/*": ["./packages/ui/src/*"]
     }
   },

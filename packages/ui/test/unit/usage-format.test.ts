@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatLogTokenSummary, logRequestModel, logResponseModel } from "@ccr/ui/pages/home/shared/logs.ts";
-import { formatCompactNumber, formatPercentFixed, formatUsdCost as formatHomeUsdCost } from "@ccr/ui/pages/home/shared/usage.ts";
-import { formatUsdCost as formatTrayUsdCost } from "@ccr/ui/pages/tray/shared.tsx";
+import { formatCompactNumber, formatPercentFixed, formatUsdCost } from "@ccr/ui/pages/home/shared/usage.ts";
 import type { RequestLogEntry } from "@ccr/core/contracts/app.ts";
 
 test("formatCompactNumber can be bound to the UI language locale", () => {
@@ -11,10 +10,8 @@ test("formatCompactNumber can be bound to the UI language locale", () => {
 });
 
 test("formatUsdCost formats large values without conflicting fraction digits", () => {
-  assert.doesNotThrow(() => formatHomeUsdCost(100));
-  assert.doesNotThrow(() => formatTrayUsdCost(100));
-  assert.doesNotMatch(formatHomeUsdCost(123.45), /[.,]45/);
-  assert.doesNotMatch(formatTrayUsdCost(123.45), /[.,]45/);
+  assert.doesNotThrow(() => formatUsdCost(100));
+  assert.doesNotMatch(formatUsdCost(123.45), /[.,]45/);
 });
 
 test("formatPercentFixed keeps two decimal places for ratios", () => {

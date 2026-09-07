@@ -4,7 +4,7 @@
 
 The Docker image runs the CCR core server under PM2 and serves the built management UI through Nginx. Nginx is the only public container entrypoint: the browser UI, management RPC, gateway API, and health route all share one published port.
 
-The image is intended for a persistent gateway and browser-based administration. It does not include Electron, the npm `ccr` command, system tray features, desktop Agent/App launching, automatic desktop updates, or desktop-only browser integrations.
+The image is intended for a persistent gateway and browser-based administration. It does not include the npm `ccr` command or Agent/App launching.
 
 ## Architecture And Ports
 
@@ -270,7 +270,7 @@ Container health only verifies Nginx/UI reachability. Check **Server** status, p
 
 Docker 镜像通过 PM2 运行 CCR Core，并由 Nginx 同时提供管理 UI、管理 RPC、模型网关和健康检查。对外只应发布 Nginx 的容器端口 `8080`；`3459`、`3456`、`3457` 都是容器内部实现端口，不应单独暴露。
 
-这个镜像面向常驻网关和浏览器管理，不包含 Electron、npm 的 `ccr` 命令、系统托盘、桌面 Agent/App 启动、桌面自动更新和桌面专属浏览器集成。
+这个镜像面向常驻网关和浏览器管理，不包含 npm 的 `ccr` 命令和 Agent/App 启动。
 
 ### 快速启动
 

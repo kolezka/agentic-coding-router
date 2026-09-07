@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import { spawn } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,79 +12,48 @@ export const projectRoot = path.resolve(__dirname, "..");
 export const packagesRoot = path.join(projectRoot, "packages");
 export const cliRoot = path.join(packagesRoot, "cli");
 export const coreRoot = path.join(packagesRoot, "core");
-export const electronRoot = path.join(packagesRoot, "electron");
 export const uiRoot = path.join(packagesRoot, "ui");
 export const cliSourceRoot = path.join(cliRoot, "src");
 export const coreSourceRoot = path.join(coreRoot, "src");
-export const electronSourceRoot = path.join(electronRoot, "src");
 export const uiSourceRoot = path.join(uiRoot, "src");
 export const legacyDistDir = path.join(projectRoot, "dist");
 export const cliDistDir = path.join(cliRoot, "dist");
 export const coreDistDir = path.join(coreRoot, "dist");
-export const electronDistDir = path.join(electronRoot, "dist");
 export const uiDistDir = path.join(uiRoot, "dist");
-export const distDir = electronDistDir;
 export const cliMainOutDir = path.join(cliDistDir, "main");
 export const coreMainOutDir = path.join(coreDistDir, "main");
-export const electronMainOutDir = path.join(electronDistDir, "main");
-export const mainOutDir = electronMainOutDir;
-export const gatewayPackageRoot = path.dirname(requireFromHere.resolve("@the-next-ai/ai-gateway/package.json"));
-export const gatewayRuntimeInput = path.join(gatewayPackageRoot, "bin", "next-ai-gateway.js");
-export const electronGatewayRuntimeOutput = path.join(electronMainOutDir, "next-ai-gateway.js");
-export const botGatewaySdkPackageRoot = path.dirname(requireFromHere.resolve("@the-next-ai/bot-gateway-sdk/package.json"));
-export const botGatewaySdkEntryInput = path.join(botGatewaySdkPackageRoot, "dist", "index.js");
-export const botGatewaySdkRunnerInput = path.join(botGatewaySdkPackageRoot, "bin", "bot-gateway-stdio.mjs");
-export const electronBotGatewaySdkRootDir = path.join(electronMainOutDir, "bot-gateway-sdk");
-export const electronBotGatewaySdkDistDir = path.join(electronBotGatewaySdkRootDir, "dist");
-export const electronBotGatewaySdkBinDir = path.join(electronBotGatewaySdkRootDir, "bin");
-export const electronBotGatewaySdkPackageOutput = path.join(electronBotGatewaySdkRootDir, "package.json");
-export const electronBotGatewaySdkEntryOutput = path.join(electronBotGatewaySdkDistDir, "index.js");
-export const electronBotGatewaySdkRunnerOutput = path.join(electronBotGatewaySdkBinDir, "bot-gateway-stdio.mjs");
 export const rendererOutDir = path.join(uiDistDir, "renderer");
 export const cliRendererOutDir = path.join(cliDistDir, "renderer");
 export const coreRendererOutDir = path.join(coreDistDir, "renderer");
-export const electronRendererOutDir = path.join(electronDistDir, "renderer");
-export const runtimeRendererOutDirs = [cliRendererOutDir, coreRendererOutDir, electronRendererOutDir];
-export const appAssetsDir = path.join(electronDistDir, "assets");
+export const runtimeRendererOutDirs = [cliRendererOutDir, coreRendererOutDir];
 export const rendererAssetsDir = path.join(rendererOutDir, "assets");
-export const bundledClaudeRuntimePluginIds = ["claude-design", "claude-ship", "new-api-account"];
-export const bundledClaudeRuntimePluginsInputDir = path.join(electronRoot, "bundled-plugins");
-export const electronBundledRuntimePluginsDir = path.join(electronDistDir, "bundled-plugins");
-export const appAssetsInput = path.join(electronRoot, "assets");
+export const gatewayPackageRoot = path.dirname(requireFromHere.resolve("@the-next-ai/ai-gateway/package.json"));
+export const gatewayRuntimeInput = path.join(gatewayPackageRoot, "bin", "next-ai-gateway.js");
 export const modelCatalogInput = path.join(coreRoot, "models.json");
 export const cliModelCatalogOutput = path.join(cliDistDir, "models.json");
 export const coreModelCatalogOutput = path.join(coreDistDir, "models.json");
-export const electronModelCatalogOutput = path.join(electronDistDir, "models.json");
-export const modelCatalogOutput = electronModelCatalogOutput;
 export const rendererRoot = uiSourceRoot;
 export const rendererHtmlInput = path.join(rendererRoot, "pages", "home", "index.html");
 export const rendererHtmlOutput = path.join(rendererOutDir, "pages", "home", "index.html");
-export const browserRendererHtmlInput = path.join(rendererRoot, "pages", "browser", "index.html");
-export const browserRendererHtmlOutput = path.join(rendererOutDir, "pages", "browser", "index.html");
-export const trayRendererHtmlInput = path.join(rendererRoot, "pages", "tray", "index.html");
-export const trayRendererHtmlOutput = path.join(rendererOutDir, "pages", "tray", "index.html");
 export const cssInput = path.join(rendererRoot, "styles", "globals.css");
 export const cssOutput = path.join(rendererAssetsDir, "main.css");
 export const webClientBridgeOutput = path.join(rendererAssetsDir, "web-client-bridge.js");
 export const requestLogBodyWorkerOutput = path.join(rendererAssetsDir, "log-body.worker.js");
 export const requestLogBodyWorkerInput = path.join(rendererRoot, "pages", "home", "shared", "log-body.worker.ts");
-export const electronUndiciProxyAgentInput = path.join(coreSourceRoot, "proxy", "undici-proxy-agent.ts");
+export const undiciProxyAgentInput = path.join(coreSourceRoot, "proxy", "undici-proxy-agent.ts");
 export const localAgentAuthProviderHookInput = path.join(coreSourceRoot, "gateway", "core-runtime", "local-agent-auth-provider-hook.ts");
 export const upstreamHeaderSanitizerInput = path.join(coreSourceRoot, "gateway", "core-runtime", "upstream-header-sanitizer.ts");
-const lightweightMcpBundleNames = ["browser-web-search-proxy-mcp.js", "fusion-vision-mcp.js", "fusion-tool-fallback-mcp.js", "media-tools-proxy-mcp.js"];
+const lightweightMcpBundleNames = ["fusion-vision-mcp.js", "fusion-tool-fallback-mcp.js", "media-tools-proxy-mcp.js"];
 const lightweightMcpBundleMaxBytes = 128 * 1024;
 const forbiddenLightweightMcpInputs = [
   { prefix: "packages/core/src/config/", reason: "config modules can pull in native storage side effects" },
   { prefix: "packages/core/src/storage/", reason: "native SQLite storage is not allowed in lightweight MCP subprocesses" },
-  { prefix: "packages/electron/src/", reason: "Electron runtime modules are not allowed in lightweight MCP subprocesses" },
   { prefix: "packages/ui/src/", reason: "UI modules do not belong in stdio MCP subprocesses" },
-  { prefix: "node_modules/libsql/", reason: "native SQLite is not allowed in lightweight MCP subprocesses" },
-  { prefix: "node_modules/electron/", reason: "Electron runtime modules are not allowed in lightweight MCP subprocesses" }
+  { prefix: "node_modules/libsql/", reason: "native SQLite is not allowed in lightweight MCP subprocesses" }
 ];
-const forbiddenLightweightMcpExternalImports = new Set(["libsql", "electron"]);
+const forbiddenLightweightMcpExternalImports = new Set(["libsql"]);
 
 const nodeExternals = [
-  "electron",
   "libsql",
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`)
@@ -94,7 +63,6 @@ export function cleanDist() {
   rmSync(legacyDistDir, { force: true, recursive: true });
   rmSync(cliDistDir, { force: true, recursive: true });
   rmSync(coreDistDir, { force: true, recursive: true });
-  rmSync(electronDistDir, { force: true, recursive: true });
   rmSync(uiDistDir, { force: true, recursive: true });
   ensureDist();
 }
@@ -102,25 +70,11 @@ export function cleanDist() {
 export function ensureDist() {
   mkdirSync(cliMainOutDir, { recursive: true });
   mkdirSync(coreMainOutDir, { recursive: true });
-  mkdirSync(electronMainOutDir, { recursive: true });
-  mkdirSync(electronBotGatewaySdkDistDir, { recursive: true });
-  mkdirSync(electronBotGatewaySdkBinDir, { recursive: true });
-  mkdirSync(appAssetsDir, { recursive: true });
-  mkdirSync(electronBundledRuntimePluginsDir, { recursive: true });
   mkdirSync(rendererAssetsDir, { recursive: true });
   for (const outputDir of runtimeRendererOutDirs) {
     mkdirSync(path.join(outputDir, "assets"), { recursive: true });
   }
   mkdirSync(path.dirname(rendererHtmlOutput), { recursive: true });
-  mkdirSync(path.dirname(browserRendererHtmlOutput), { recursive: true });
-  mkdirSync(path.dirname(trayRendererHtmlOutput), { recursive: true });
-}
-
-export function copyAppAssets() {
-  ensureDist();
-  if (existsSync(appAssetsInput)) {
-    cpSync(appAssetsInput, appAssetsDir, { recursive: true });
-  }
 }
 
 export function copyModelCatalog() {
@@ -128,7 +82,6 @@ export function copyModelCatalog() {
   if (existsSync(modelCatalogInput)) {
     cpSync(modelCatalogInput, cliModelCatalogOutput);
     cpSync(modelCatalogInput, coreModelCatalogOutput);
-    cpSync(modelCatalogInput, electronModelCatalogOutput);
   }
 }
 
@@ -136,21 +89,6 @@ export function copyRendererHtml() {
   copyRendererPageHtml(rendererHtmlInput, rendererHtmlOutput, "main.js", {
     beforeModuleScriptTags: ['    <script src="../../assets/web-client-bridge.js"></script>']
   });
-}
-
-export function copyTrayRendererHtml() {
-  copyRendererPageHtml(trayRendererHtmlInput, trayRendererHtmlOutput, "tray.js");
-}
-
-export function copyBrowserRendererHtml() {
-  copyRendererPageHtml(browserRendererHtmlInput, browserRendererHtmlOutput, "browser.js");
-}
-
-export function copyBundledClaudeRuntimePlugins() {
-  ensureDist();
-  for (const pluginId of bundledClaudeRuntimePluginIds) {
-    copyBundledClaudeRuntimePlugin(pluginId);
-  }
 }
 
 export function syncUiRendererToRuntimeDists() {
@@ -185,75 +123,25 @@ function copyRendererPageHtml(input, output, scriptName, options = {}) {
   writeFileSync(output, html, "utf8");
 }
 
-function copyBundledClaudeRuntimePlugin(pluginId) {
-  const inputDir = path.join(bundledClaudeRuntimePluginsInputDir, pluginId);
-  const outputDir = path.join(electronBundledRuntimePluginsDir, pluginId);
-  const moduleInput = path.join(inputDir, "index.cjs");
-  if (!existsSync(moduleInput)) {
-    throw new Error(`Bundled Claude runtime plugin ${pluginId} is missing: ${moduleInput}`);
-  }
-
-  rmSync(outputDir, { force: true, recursive: true });
-  mkdirSync(outputDir, { recursive: true });
-  for (const fileName of ["index.cjs", "plugin.json", "README.md"]) {
-    const input = path.join(inputDir, fileName);
-    if (existsSync(input)) {
-      cpSync(input, path.join(outputDir, fileName));
-    }
-  }
-}
-
 function hasScriptTag(html, scriptTag) {
   const sourceMatch = scriptTag.match(/\bsrc="([^"]+)"/);
   return sourceMatch ? html.includes(sourceMatch[1]) : html.includes(scriptTag);
 }
 
-function normalizeDuplicateShebangs(source) {
-  const lines = source.split("\n");
-  if (!lines[0]?.startsWith("#!")) {
-    return source;
-  }
-  let index = 1;
-  while (lines[index]?.startsWith("#!")) {
-    index += 1;
-  }
-  return [lines[0], ...lines.slice(index)].join("\n");
-}
-
-export function createMainBuildOptions({ mode = "production", plugins = [] } = {}) {
-  return {
-    absWorkingDir: projectRoot,
-    bundle: true,
-    entryNames: "[name]",
-    entryPoints: [
-      path.join(electronSourceRoot, "main", "main.ts"),
-      path.join(electronSourceRoot, "main", "browser-preload.ts"),
-      gatewayRuntimeInput,
-      path.join(coreSourceRoot, "gateway", "core-runtime", "gateway-bootstrap.ts"),
-      path.join(coreSourceRoot, "mcp", "browser-web-search-proxy-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "fusion-vision-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "fusion-tool-fallback-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "media-tools-proxy-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "toolhub-mcp.ts"),
-      path.join(coreSourceRoot, "observability", "request-log-worker.ts"),
-      path.join(coreSourceRoot, "routing", "route-script-worker.ts"),
-      localAgentAuthProviderHookInput,
-      upstreamHeaderSanitizerInput,
-      electronUndiciProxyAgentInput,
-      path.join(electronSourceRoot, "main", "preload.ts")
-    ],
-    external: nodeExternals,
-    format: "cjs",
-    legalComments: "none",
-    logLevel: "info",
-    metafile: true,
-    minify: mode === "production",
-    outdir: electronMainOutDir,
-    platform: "node",
-    plugins: [packageAliasPlugin(), ...plugins],
-    sourcemap: mode !== "production",
-    target: "node22"
-  };
+function sharedRuntimeEntryPoints() {
+  return [
+    gatewayRuntimeInput,
+    path.join(coreSourceRoot, "gateway", "core-runtime", "gateway-bootstrap.ts"),
+    path.join(coreSourceRoot, "mcp", "fusion-vision-mcp.ts"),
+    path.join(coreSourceRoot, "mcp", "fusion-tool-fallback-mcp.ts"),
+    path.join(coreSourceRoot, "mcp", "media-tools-proxy-mcp.ts"),
+    path.join(coreSourceRoot, "mcp", "toolhub-mcp.ts"),
+    path.join(coreSourceRoot, "observability", "request-log-worker.ts"),
+    path.join(coreSourceRoot, "routing", "route-script-worker.ts"),
+    localAgentAuthProviderHookInput,
+    upstreamHeaderSanitizerInput,
+    undiciProxyAgentInput
+  ];
 }
 
 export function createCliBuildOptions({ mode = "production", plugins = [] } = {}) {
@@ -263,20 +151,13 @@ export function createCliBuildOptions({ mode = "production", plugins = [] } = {}
     entryNames: "[name]",
     entryPoints: [
       path.join(cliSourceRoot, "cli.ts"),
-      path.join(coreSourceRoot, "gateway", "core-runtime", "gateway-bootstrap.ts"),
-      path.join(coreSourceRoot, "mcp", "fusion-vision-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "fusion-tool-fallback-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "media-tools-proxy-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "toolhub-mcp.ts"),
-      path.join(coreSourceRoot, "observability", "request-log-worker.ts"),
-      path.join(coreSourceRoot, "routing", "route-script-worker.ts"),
-      localAgentAuthProviderHookInput,
-      upstreamHeaderSanitizerInput
+      ...sharedRuntimeEntryPoints()
     ],
-    external: nodeExternals.filter((moduleName) => moduleName !== "electron"),
+    external: nodeExternals,
     format: "cjs",
     legalComments: "none",
     logLevel: "info",
+    metafile: true,
     minify: mode === "production",
     outdir: cliMainOutDir,
     platform: "node",
@@ -293,20 +174,13 @@ export function createCoreServerBuildOptions({ mode = "production", plugins = []
     entryNames: "[name]",
     entryPoints: [
       path.join(coreSourceRoot, "entrypoints", "server.ts"),
-      path.join(coreSourceRoot, "gateway", "core-runtime", "gateway-bootstrap.ts"),
-      path.join(coreSourceRoot, "mcp", "fusion-vision-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "fusion-tool-fallback-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "media-tools-proxy-mcp.ts"),
-      path.join(coreSourceRoot, "mcp", "toolhub-mcp.ts"),
-      path.join(coreSourceRoot, "observability", "request-log-worker.ts"),
-      path.join(coreSourceRoot, "routing", "route-script-worker.ts"),
-      localAgentAuthProviderHookInput,
-      upstreamHeaderSanitizerInput
+      ...sharedRuntimeEntryPoints()
     ],
-    external: nodeExternals.filter((moduleName) => moduleName !== "electron"),
+    external: nodeExternals,
     format: "cjs",
     legalComments: "none",
     logLevel: "info",
+    metafile: true,
     minify: mode === "production",
     outdir: coreMainOutDir,
     platform: "node",
@@ -348,22 +222,6 @@ export function createRendererBuildOptions({ mode = "production", plugins = [] }
   };
 }
 
-export function createTrayRendererBuildOptions({ mode = "production", plugins = [] } = {}) {
-  return {
-    ...createRendererBuildOptions({ mode, plugins }),
-    entryPoints: [path.join(rendererRoot, "pages", "tray", "main.tsx")],
-    outfile: path.join(rendererAssetsDir, "tray.js")
-  };
-}
-
-export function createBrowserRendererBuildOptions({ mode = "production", plugins = [] } = {}) {
-  return {
-    ...createRendererBuildOptions({ mode, plugins }),
-    entryPoints: [path.join(rendererRoot, "pages", "browser", "main.tsx")],
-    outfile: path.join(rendererAssetsDir, "browser.js")
-  };
-}
-
 export function createWebClientBridgeBuildOptions({ mode = "production", plugins = [] } = {}) {
   return {
     absWorkingDir: projectRoot,
@@ -401,27 +259,6 @@ export function createRequestLogBodyWorkerBuildOptions({ mode = "production", pl
   };
 }
 
-export function createBotGatewaySdkBuildOptions({ mode = "production", plugins = [] } = {}) {
-  return {
-    absWorkingDir: projectRoot,
-    bundle: true,
-    entryPoints: [botGatewaySdkEntryInput],
-    external: [
-      ...builtinModules,
-      ...builtinModules.map((moduleName) => `node:${moduleName}`)
-    ],
-    format: "esm",
-    legalComments: "none",
-    logLevel: "info",
-    minify: mode === "production",
-    outfile: electronBotGatewaySdkEntryOutput,
-    platform: "node",
-    plugins,
-    sourcemap: mode !== "production",
-    target: "node22"
-  };
-}
-
 export function watchPlugin(name, onEnd) {
   return {
     name: `${name}-watch`,
@@ -435,51 +272,18 @@ export function watchPlugin(name, onEnd) {
   };
 }
 
-export async function buildMain(options = {}) {
-  const [mainBuildResult] = await Promise.all([
-    esbuild.build(createMainBuildOptions(options)),
-    buildBotGatewaySdkRuntime(options),
-    buildCoreServer(options),
-    buildCli(options)
-  ]);
-  copyCliRuntimeToElectronDist();
-  validateLightweightMcpBundles(mainBuildResult.metafile);
-}
-
-export async function buildBotGatewaySdkRuntime(options = {}) {
-  ensureDist();
-  await esbuild.build(createBotGatewaySdkBuildOptions(options));
-  writeFileSync(
-    electronBotGatewaySdkPackageOutput,
-    `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`,
-    "utf8"
-  );
-  writeFileSync(
-    electronBotGatewaySdkRunnerOutput,
-    normalizeDuplicateShebangs(readFileSync(botGatewaySdkRunnerInput, "utf8")),
-    "utf8"
-  );
-  chmodSync(electronBotGatewaySdkRunnerOutput, 0o755);
-}
-
 export async function buildCli(options = {}) {
-  await esbuild.build(createCliBuildOptions(options));
+  const result = await esbuild.build(createCliBuildOptions(options));
+  validateLightweightMcpBundles(result.metafile);
 }
 
 export async function buildCoreServer(options = {}) {
-  await esbuild.build(createCoreServerBuildOptions(options));
+  const result = await esbuild.build(createCoreServerBuildOptions(options));
+  validateLightweightMcpBundles(result.metafile);
 }
 
 export async function buildRenderer(options = {}) {
   await esbuild.build(createRendererBuildOptions(options));
-}
-
-export async function buildTrayRenderer(options = {}) {
-  await esbuild.build(createTrayRendererBuildOptions(options));
-}
-
-export async function buildBrowserRenderer(options = {}) {
-  await esbuild.build(createBrowserRendererBuildOptions(options));
 }
 
 export async function buildWebClientBridge(options = {}) {
@@ -488,14 +292,6 @@ export async function buildWebClientBridge(options = {}) {
 
 export async function buildRequestLogBodyWorker(options = {}) {
   await esbuild.build(createRequestLogBodyWorkerBuildOptions(options));
-}
-
-export function copyCliRuntimeToElectronDist() {
-  ensureDist();
-  const cliRuntime = path.join(cliMainOutDir, "cli.js");
-  if (existsSync(cliRuntime)) {
-    cpSync(cliRuntime, path.join(electronMainOutDir, "cli.js"));
-  }
 }
 
 export async function buildStyles({ minify = false } = {}) {
@@ -552,9 +348,6 @@ function packageAliasPlugin() {
       });
       build.onResolve({ filter: /^@ccr\/core\// }, (args) => {
         return { path: resolvePackageImport(coreSourceRoot, args.path.slice("@ccr/core/".length)) };
-      });
-      build.onResolve({ filter: /^@ccr\/electron\// }, (args) => {
-        return { path: resolvePackageImport(electronSourceRoot, args.path.slice("@ccr/electron/".length)) };
       });
       build.onResolve({ filter: /^@ccr\/ui\// }, (args) => {
         return { path: resolvePackageImport(uiSourceRoot, args.path.slice("@ccr/ui/".length)) };

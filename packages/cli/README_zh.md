@@ -2,9 +2,9 @@
 
 [English](README.md) · [完整文档](https://ccrdesk.top/) · [GitHub](https://github.com/musistudio/claude-code-router)
 
-`@musistudio/claude-code-router` 是 Claude Code Router 的 Node.js 发行版。它通过 `ccr` 命令提供浏览器管理界面、本地模型网关和 Agent 配置启动能力，不需要安装 Electron。
+`@musistudio/claude-code-router` 是 Claude Code Router 的 Node.js 发行版。它通过 `ccr` 命令提供浏览器管理界面、本地模型网关和 Agent 配置启动能力。
 
-CLI 适合开发机和无桌面的服务器。如果你需要系统托盘、桌面通知、应用自动更新或桌面端专属的浏览器集成，请安装桌面应用。
+CLI 适合开发机和无桌面的服务器。
 
 ## 环境要求与安装
 
