@@ -3015,7 +3015,7 @@ function withClaudeProductRuntimePluginConfig(config: AppConfig, pluginId: strin
   }
   const plugin = claudeProductRuntimePluginConfig(pluginId);
   if (!plugin) {
-    throw new Error(`${productName} runtime module was not found. Rebuild app assets so the bundled ${productName} plugin is copied into the Electron dist.`);
+    throw new Error(`${productName} runtime module was not found. Install the ${productName} plugin from CCR extensions and try again.`);
   }
   if (existingIndex >= 0) {
     const existing = config.plugins[existingIndex];
@@ -3106,20 +3106,8 @@ function isDesktopBundledClaudeRuntimePlugin(pluginId: string): boolean {
 }
 
 function bundledRuntimePluginModuleCandidates(pluginId: string): string[] {
-  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  const resourceCandidates = resourcesPath
-    ? [
-      path.join(resourcesPath, "app.asar.unpacked", "dist", "bundled-plugins", pluginId, "index.cjs"),
-      path.join(resourcesPath, "app.asar", "dist", "bundled-plugins", pluginId, "index.cjs"),
-      path.join(resourcesPath, "app", "dist", "bundled-plugins", pluginId, "index.cjs")
-    ]
-    : [];
   return uniqueStrings([
-    ...resourceCandidates,
-    path.join(__dirname, "..", "bundled-plugins", pluginId, "index.cjs"),
-    path.resolve(__dirname, "..", "..", "..", "electron", "bundled-plugins", pluginId, "index.cjs"),
-    path.resolve(process.cwd(), "packages", "electron", "dist", "bundled-plugins", pluginId, "index.cjs"),
-    path.resolve(process.cwd(), "packages", "electron", "bundled-plugins", pluginId, "index.cjs")
+    path.join(__dirname, "..", "bundled-plugins", pluginId, "index.cjs")
   ]);
 }
 

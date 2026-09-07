@@ -7,7 +7,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/cli/package.json packages/cli/package.json
 COPY packages/core/package.json packages/core/package.json
-COPY packages/electron/package.json packages/electron/package.json
 COPY packages/ui/package.json packages/ui/package.json
 RUN npm ci
 

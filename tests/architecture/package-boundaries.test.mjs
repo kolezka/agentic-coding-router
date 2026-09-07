@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 const projectRoot = process.cwd();
-const packageNames = ["cli", "core", "electron", "ui"];
+const packageNames = ["cli", "core", "ui"];
 
 test("legacy Electron process test suites contain no source files", () => {
   for (const directoryName of ["main", "renderer"]) {
@@ -28,7 +28,7 @@ test("package code and tests do not reach into another package through relative 
     const packageRoot = path.join(projectRoot, "packages", packageName);
     return sourceFiles(packageRoot).flatMap((file) => {
       const source = readFileSync(file, "utf8");
-      return /(?:from\s+|import\s*\(|require\s*\()["'][^"']*packages\/(?:cli|core|electron|ui)\/src\//.test(source)
+      return /(?:from\s+|import\s*\(|require\s*\()["'][^"']*packages\/(?:cli|core|ui)\/src\//.test(source)
         ? [path.relative(projectRoot, file)]
         : [];
     });

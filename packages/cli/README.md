@@ -2,9 +2,9 @@
 
 [中文](README_zh.md) · [Documentation](https://ccrdesk.top/en/) · [GitHub](https://github.com/musistudio/claude-code-router)
 
-`@musistudio/claude-code-router` is the Node.js distribution of Claude Code Router. It provides the `ccr` command, the browser-based management UI, the local model gateway, and profile launch commands without requiring Electron.
+`@musistudio/claude-code-router` is the Node.js distribution of Claude Code Router. It provides the `ccr` command, the browser-based management UI, the local model gateway, and profile launch commands.
 
-Use the CLI on developer machines and headless hosts. If you want the tray, desktop notifications, automatic app updates, or desktop-only browser integrations, install the desktop application instead.
+Use the CLI on developer machines and headless hosts.
 
 ## Requirements And Installation
 
@@ -107,10 +107,8 @@ ccr <profile-name-or-id> [cli|app] [-- <agent arguments>]
 - Put agent-specific arguments after `--` so they cannot be confused with CCR options.
 - If the surface is omitted, CCR uses the first surface allowed by the profile: CLI for Claude Code, Codex, Grok CLI, Kimi CLI, and Pi; App for ZCode.
 - Grok CLI, Kimi CLI, and Pi support CLI only. ZCode supports App only. Claude App and ZCode App do not accept trailing agent arguments.
-- Desktop App launches require that app to be installed and a graphical session to be available.
+- App launches require that app to be installed and a graphical session to be available.
 - Start the CCR service before opening most profiles. Grok CLI, Kimi CLI, and Pi profiles can start a temporary shared service automatically and stop it after the last managed session exits.
-
-The desktop application installs a related command named `ccr-app`. Commands copied from desktop Agent Profiles cards use `ccr-app`; the npm package documented here installs `ccr`.
 
 ## Configuration And Runtime Files
 

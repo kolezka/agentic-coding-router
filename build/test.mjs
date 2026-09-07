@@ -5,12 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-const ccrExtensionsRoot = path.resolve(process.env.CCR_EXTENSIONS_DIR || path.join(projectRoot, "..", "ccr-extensions"));
 const testsOutDir = path.join(projectRoot, ".test-dist");
 const packageRoots = {
   cli: path.join(projectRoot, "packages", "cli", "src"),
   core: path.join(projectRoot, "packages", "core", "src"),
-  electron: path.join(projectRoot, "packages", "electron", "src"),
   ui: path.join(projectRoot, "packages", "ui", "src")
 };
 const testProjects = {
@@ -37,15 +35,8 @@ const testProjects = {
     testDirs: [
       {
         dir: path.join(projectRoot, "packages", "core", "test")
-      },
-      {
-        dir: path.join(ccrExtensionsRoot, "plugins", "claude-design", "test"),
-        outputPrefix: "plugins/claude-design"
       }
     ]
-  },
-  electron: {
-    testDir: path.join(projectRoot, "packages", "electron", "test")
   },
   ui: {
     testDir: path.join(projectRoot, "packages", "ui", "test")
@@ -92,8 +83,7 @@ for (const [name, project] of selectedProjects) {
     bundle: true,
     entryPoints,
     external: [
-      "libsql",
-      "electron"
+      "libsql"
     ],
     format: "cjs",
     jsx: "automatic",
@@ -170,8 +160,8 @@ function packageAliasPlugin() {
   return {
     name: "test-package-alias",
     setup(build) {
-      build.onResolve({ filter: /^@ccr\/(cli|core|electron|ui)\// }, (args) => {
-        const match = args.path.match(/^@ccr\/(cli|core|electron|ui)\/(.+)$/);
+      build.onResolve({ filter: /^@ccr\/(cli|core|ui)\// }, (args) => {
+        const match = args.path.match(/^@ccr\/(cli|core|ui)\/(.+)$/);
         if (!match) {
           return undefined;
         }

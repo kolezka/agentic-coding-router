@@ -1,5 +1,4 @@
-import electron from "electron";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,8 +10,7 @@ const testsOutDir = path.join(projectRoot, ".test-dist");
 const testProjects = {
   architecture: { runtime: "node" },
   cli: { runtime: "node" },
-  core: { runtime: "node-with-electron-fallback" },
-  electron: { runtime: "electron" },
+  core: { runtime: "node" },
   ui: { runtime: "node" }
 };
 const requestedProjects = process.argv.slice(2);
@@ -36,21 +34,19 @@ async function runProject(project) {
   }
 
   const testHome = mkdtempSync(path.join(os.tmpdir(), `ccr-${project}-test-home-`));
-  const runtime = resolveRuntime(testProjects[project].runtime);
-  const executable = runtime === "electron" ? electron : process.execPath;
+  const runtime = testProjects[project].runtime;
   console.log(`\nRunning ${project} tests with ${runtime}...`);
 
   try {
     await new Promise((resolve, reject) => {
-      const child = spawn(executable, ["--test", ...testFiles], {
+      const child = spawn(process.execPath, ["--test", ...testFiles], {
         cwd: projectRoot,
         env: {
           ...process.env,
           CCR_INTERNAL_APP_DATA_DIR: path.join(testHome, "app-data"),
           CCR_INTERNAL_HOME_DIR: testHome,
           CCR_INTERNAL_USER_DATA_DIR: path.join(testHome, "user-data"),
-          HOME: testHome,
-          ...(runtime === "electron" ? { ELECTRON_RUN_AS_NODE: "1" } : {})
+          HOME: testHome
         },
         stdio: "inherit"
       });
@@ -71,17 +67,6 @@ async function runProject(project) {
   } finally {
     rmSync(testHome, { force: true, recursive: true });
   }
-}
-
-function resolveRuntime(runtime) {
-  if (runtime !== "node-with-electron-fallback") {
-    return runtime;
-  }
-  const probe = spawnSync(process.execPath, [
-    "-e",
-    "const Database = require('libsql'); const db = new Database(':memory:'); db.close();"
-  ], { stdio: "ignore" });
-  return probe.status === 0 ? "node" : "electron";
 }
 
 function findCompiledTests(dir) {
