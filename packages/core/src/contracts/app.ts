@@ -756,7 +756,14 @@ export type RouterFallbackMode = "off" | "retry" | "model-chain";
 
 export const ROUTER_FALLBACK_MAX_RETRY_COUNT = 9999;
 
+/** Dedicated budget for empty-completion retries, kept small because each retry re-sends the whole request. */
+export const ROUTER_FALLBACK_MAX_EMPTY_COMPLETION_RETRY_COUNT = 10;
+
+export const ROUTER_FALLBACK_DEFAULT_EMPTY_COMPLETION_RETRY_COUNT = 2;
+
 export type RouterFallbackConfig = {
+  /** Retries after the initial dispatch when the upstream returns an empty completion. Defaults to 2. */
+  emptyCompletionRetryCount?: number;
   mode: RouterFallbackMode;
   models: string[];
   retryCount: number;

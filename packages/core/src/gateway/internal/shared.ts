@@ -7,6 +7,7 @@ import type { ApiKeyConfig, AppConfig, GatewayMcpServerConfig, GatewayProviderCa
 import type { ClaudeAppGatewayModelRouteOptions } from "@ccr/core/agents/claude-app/gateway-routes";
 import type { RouteModelRef } from "@ccr/core/routing/contracts";
 import { findModelCatalogEntry } from "@ccr/core/gateway/model-catalog";
+import type { EmptyCompletionFailure } from "@ccr/core/gateway/upstream/empty-completion";
 
 
 export type CoreGatewayProvider = {
@@ -180,6 +181,8 @@ export type UpstreamAttempt = {
   logicalProvider?: string;
   model?: string;
   target?: RouteModelRef;
+  /** Protocol of the routed provider capability, set even when the provider has no credential entries. */
+  targetProtocol?: GatewayProviderProtocol;
 };
 
 
@@ -195,6 +198,8 @@ export type UpstreamFailedAttempt = {
 
 export type UpstreamFetchResult = {
   attempt: UpstreamAttempt;
+  /** Set when the executor verified the failure itself, so later stages need not re-classify it. */
+  failure?: EmptyCompletionFailure;
   failedAttempts: UpstreamFailedAttempt[];
   response: Response;
 };
