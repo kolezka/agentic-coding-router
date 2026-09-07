@@ -21,6 +21,7 @@ import { isLocalClaudeCodeOauthProviderPlugin, mergeAnthropicBetaValues } from "
 import { normalizeLocalAgentConfigDir, sameLocalAgentConfigDir } from "@ccr/core/agents/local-providers/source";
 import { isLocalAgentOauthProviderPlugin } from "@ccr/core/gateway/core-runtime/local-agent-auth-provider-hook";
 import { resolveConfiguredProviderModelSelector, resolveUniqueConfiguredProviderModelSelector } from "@ccr/core/routing/model-resolution";
+import { responsesStreamGuardConfigKey } from "@ccr/core/gateway/core-runtime/responses-stream-guard";
 
 const upstreamHeaderSanitizerPluginKey = "ccr-upstream-header-sanitizer";
 const localAgentAuthProviderHookPluginKey = "ccr-local-agent-auth-provider-hooks";
@@ -165,6 +166,9 @@ export async function compileCoreGatewayConfig(
       }
     ],
     upstreamTimeoutMs: Number(config.API_TIMEOUT_MS) || 0,
+    [responsesStreamGuardConfigKey]: {
+      idleTimeoutMs: responsesStreamIdleTimeoutMs(config)
+    },
     agent: {
       ...pluginAgentConfig,
       mcpServers
@@ -174,6 +178,35 @@ export async function compileCoreGatewayConfig(
     providers,
     virtualModelProfiles
   };
+}
+
+/** Largest accepted stream idle budget: a day, so a typo cannot disable the watchdog silently. */
+const maxResponsesStreamIdleTimeoutMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Idle budget for Responses streams. An explicit `API_STREAM_IDLE_TIMEOUT_MS`
+ * wins, an explicit `0` disables the watchdog, and anything missing or out of
+ * range falls back to the existing request budget.
+ */
+function responsesStreamIdleTimeoutMs(config: AppConfig): number {
+  return normalizeStreamIdleTimeoutMs(config.API_STREAM_IDLE_TIMEOUT_MS)
+    ?? normalizeStreamIdleTimeoutMs(config.API_TIMEOUT_MS)
+    ?? 0;
+}
+
+function normalizeStreamIdleTimeoutMs(value: unknown): number | undefined {
+  if (value === undefined || value === null || typeof value === "boolean") {
+    return undefined;
+  }
+  if (typeof value === "string" && !value.trim()) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxResponsesStreamIdleTimeoutMs) {
+    return undefined;
+  }
+  // Only a literal 0 disables the watchdog; a fraction rounds up to 1 ms.
+  return parsed === 0 ? 0 : Math.max(1, Math.trunc(parsed));
 }
 
 function localAgentAuthProviderHookPluginConfig(providerPlugins: unknown[]): Record<string, unknown> | undefined {

@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
 import path from "node:path";
+import {
+  installResponsesStreamGuard,
+  resolveResponsesStreamGuardSettings,
+  withoutResponsesStreamGuardOptions
+} from "@ccr/core/gateway/core-runtime/responses-stream-guard";
 
 type GatewayStartMessage = {
   config: Record<string, unknown>;
@@ -30,8 +35,16 @@ process.on("message", (message: unknown) => {
   try {
     const start = parseStartMessage(message);
     started = true;
-    installVirtualConfigFile(start.config);
+    const streamGuardSettings = resolveResponsesStreamGuardSettings(start.config);
+    installVirtualConfigFile(withoutResponsesStreamGuardOptions(start.config));
     process.env.GATEWAY_CONFIG_PATH = virtualConfigPath;
+    if (streamGuardSettings) {
+      // Must precede the entry require: the gateway bundle captures
+      // `require("undici").fetch` while it initializes.
+      installResponsesStreamGuard(streamGuardSettings, start.gatewayEntry, (warning) => {
+        console.error(`[gateway-bootstrap] ${warning}`);
+      });
+    }
     requireFromHere(start.gatewayEntry);
     process.send?.({ protocolVersion: 1, type: "gateway:config-accepted" });
   } catch (error) {
