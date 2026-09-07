@@ -496,6 +496,19 @@ Before moving to the next attempt, CCR waits for every fallback-triggering failu
 
 **Fallback targets** also switches on `4xx` because model-not-found, auth, or provider-side rejection errors may only affect the current target. If the fallback model works, the request can still succeed.
 
+## Empty completion retries
+
+A provider sometimes answers with a completed response that carries no text, no reasoning, and no tool call. CCR treats that as its own kind of failure with its own budget instead of an ordinary status failure.
+
+`Router.fallback.emptyCompletionRetryCount` sets how many extra dispatches CCR sends to the same target after the first one. It defaults to `2`, accepts `0` to turn the behavior off, and is capped at 10. The budget is separate from `retryCount`: an empty completion never spends the ordinary same-target retries, and the ordinary retries never multiply this budget. CCR waits 150 ms before the first extra dispatch and 300 ms before the rest, and a client disconnect ends the wait immediately.
+
+Two shapes are recognized, both limited to `openai_responses` targets:
+
+- A `502` whose body reports that every upstream attempt failed to parse a completed response with no output.
+- A streamed response that reaches its terminal event without any text, reasoning, tool call, or refusal. The stream is inspected before the client receives headers and is replayed byte for byte as soon as the first meaningful output arrives, so a normal answer is neither delayed nor buffered to the end. A truncated response (`max_tokens`, `incomplete`) counts as real output. Buffering before that first output is capped at 1 MB, and a stream that exceeds the cap fails with `empty_completion_guard_overflow` instead of being passed through.
+
+Once the budget is spent, CCR moves to a different model when a fallback chain configures one. Otherwise it returns the upstream error body unchanged except for `error.details.ccr_empty_completion`, which reports `ccr_upstream_attempts`: the number of requests CCR itself sent. The `attempts` list inside the upstream body counts provider calls made inside the upstream gateway and is left untouched.
+
 ## How to configure
 
 ### Global fallback

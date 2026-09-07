@@ -1,0 +1,111 @@
+{
+  "error": {
+    "attempts": [
+      {
+        "details": {
+          "error": null,
+          "gateway_error": {
+            "code": "empty_model_output",
+            "retryable": true
+          },
+          "id": "synthetic-response-1",
+          "incomplete_details": null,
+          "model": "gpt-6-astra",
+          "object": "response",
+          "output": [
+            {
+              "content": [
+                {
+                  "annotations": [],
+                  "logprobs": [],
+                  "text": "",
+                  "type": "output_text"
+                }
+              ],
+              "id": "synthetic-output-1-1",
+              "phase": "final_answer",
+              "role": "assistant",
+              "status": "completed",
+              "type": "message"
+            }
+          ],
+          "status": "completed",
+          "usage": {
+            "input_tokens": 521316,
+            "input_tokens_details": {
+              "cache_creation_tokens": 0,
+              "cache_write_tokens": 0,
+              "cached_tokens": 519680
+            },
+            "output_tokens": 4,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 521320
+          }
+        },
+        "message": "OpenAI response does not contain text output, reasoning output, or tool calls.",
+        "provider": "openai",
+        "provider_name": "codex-api::openai_responses",
+        "stage": "response_parse",
+        "status": 502
+      },
+      {
+        "details": {
+          "error": null,
+          "gateway_error": {
+            "code": "empty_model_output",
+            "retryable": true
+          },
+          "id": "synthetic-response-2",
+          "incomplete_details": null,
+          "model": "gpt-6-astra",
+          "object": "response",
+          "output": [
+            {
+              "content": [
+                {
+                  "annotations": [],
+                  "logprobs": [],
+                  "text": "",
+                  "type": "output_text"
+                }
+              ],
+              "id": "synthetic-output-2-1",
+              "phase": "final_answer",
+              "role": "assistant",
+              "status": "completed",
+              "type": "message"
+            }
+          ],
+          "status": "completed",
+          "usage": {
+            "input_tokens": 521316,
+            "input_tokens_details": {
+              "cache_creation_tokens": 0,
+              "cache_write_tokens": 0,
+              "cached_tokens": 521216
+            },
+            "output_tokens": 4,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 521320
+          }
+        },
+        "message": "OpenAI response does not contain text output, reasoning output, or tool calls.",
+        "provider": "openai",
+        "provider_name": "codex-api::openai_responses",
+        "stage": "response_parse",
+        "status": 502
+      }
+    ],
+    "message": "All target providers failed.",
+    "target_provider_names": [
+      "codex-api::openai_responses"
+    ],
+    "target_providers": [
+      "openai"
+    ]
+  }
+}
