@@ -397,8 +397,6 @@ module.exports = {
   }
 });
 
-// Pojedynczy Buffer albo null przekazany do natywnego sterownika jako jedyny argument
-// zabija proces (SIGABRT), więc obciążenie leci w dziecku i sprawdzamy jego wynik.
 const sqliteStoreBlobChildEnvironmentFlag = "CCR_PLUGIN_SQLITE_STORE_BLOB_CHILD";
 const sqliteStoreBlobTestName = "plugin sqlite store round-trips single BLOB and null parameters";
 
@@ -412,7 +410,6 @@ test(sqliteStoreBlobTestName, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccr-plugin-sqlite-store-child-"));
   const marker = path.join(dir, "workload-completed");
 
-  // Bez usunięcia NODE_TEST_CONTEXT dziecko uzna się za zagnieżdżony runner i nie odpali pliku.
   const childEnvironment = { ...process.env, [sqliteStoreBlobChildEnvironmentFlag]: marker };
   delete childEnvironment.NODE_TEST_CONTEXT;
 
@@ -437,7 +434,6 @@ test(sqliteStoreBlobTestName, async () => {
       0,
       `sqlite store workload exited with ${child.status}:\n${child.stdout}${child.stderr}`
     );
-    // Bez markera nie wiemy, czy dziecko w ogóle uruchomiło obciążenie.
     assert.equal(
       existsSync(marker),
       true,

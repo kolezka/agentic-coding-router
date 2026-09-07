@@ -787,8 +787,6 @@ function configureSqliteDatabase(database: SqlDatabase): void {
   database.pragma("busy_timeout = 5000");
 }
 
-// Parametry idą jedną tablicą: pojedynczy Buffer albo null jako jedyny argument
-// wywala natywny sterownik, a tablica wiąże się pozycyjnie.
 function queryRows(database: SqlDatabase, sql: string, params: SqlValue[] = []): Array<Record<string, SqlValue>> {
   return database.prepare(sql).all(params) as Array<Record<string, SqlValue>>;
 }

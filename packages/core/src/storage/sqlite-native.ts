@@ -12,7 +12,6 @@ export type BetterSqliteDatabaseOptions = {
   timeout?: number;
 };
 
-// Domyślny busy_timeout starego drivera. libsql bez tej opcji ustawia 0.
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 const MAX_BUSY_TIMEOUT_MS = 2147483647;
 
@@ -24,15 +23,11 @@ export function createBetterSqliteDatabase(
   const database = new DatabaseConstructor(resolveDatabaseLocation(filename, options), {
     timeout: resolveBusyTimeout(options.timeout)
   });
-  // libsql zawsze zwraca name "" i readonly false, więc uzupełniamy je po otwarciu.
   database.name = filename;
   database.readonly = readonly;
   return database;
 }
 
-// libsql ignoruje opcje readonly i fileMustExist, jedyne wejście to tryb w URI pliku.
-// Dlatego realne ścieżki idą jako file: URI, co przy okazji chroni znaki "?" i "#"
-// przed potraktowaniem ich jako składni URI i nie włącza zdalnego drivera.
 function resolveDatabaseLocation(filename: string, options: BetterSqliteDatabaseOptions): string {
   if (isTransientDatabaseFilename(filename)) {
     if (options.readonly === true) {

@@ -5,7 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { createBetterSqliteDatabase } from "@ccr/core/storage/sqlite-native.ts";
 
-// Zamykamy tylko otwarte połączenia i nie tłumimy błędów z close().
 function closeIfOpen(database) {
   if (database?.open) {
     database.close();

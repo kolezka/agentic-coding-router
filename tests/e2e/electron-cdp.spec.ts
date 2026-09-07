@@ -408,7 +408,6 @@ function readSqliteRows<Row>(file: string, query: string): Row[] {
   const output = runElectronNode(`
     const { pathToFileURL } = require("node:url");
     const Database = require("libsql");
-    // libsql ignoruje opcję readonly, tryb tylko do odczytu wchodzi przez URI pliku.
     const location = pathToFileURL(process.env.CCR_E2E_SQLITE_FILE);
     location.searchParams.set("mode", "ro");
     const database = new Database(location.href, { timeout: 5000 });

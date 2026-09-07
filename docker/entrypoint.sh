@@ -116,7 +116,6 @@ function syncSqliteConfig() {
   } catch {
     return;
   }
-  // Poza adapterem, więc busy_timeout starego drivera ustawiamy tu jawnie.
   const db = new Database(appConfigDbFile, { timeout: 5000 });
   try {
     const row = db.prepare("select value_json from app_config where key = ?").get("default");

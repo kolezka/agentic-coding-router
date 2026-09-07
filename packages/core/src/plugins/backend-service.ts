@@ -189,9 +189,6 @@ function openBetterSqliteDatabase(dbFile: string): SqlDatabase {
   return new SqliteCompatDatabase(raw);
 }
 
-// Parametry przekazujemy jako jedną tablicę, nigdy przez spread. Pojedynczy Buffer
-// albo null podany jako jedyny argument do run/get/all wywala proces natywnym panic,
-// a tablica jest wiązana pozycyjnie i przechodzi poprawnie.
 class SqliteCompatDatabase implements SqlDatabase {
   constructor(private readonly raw: BetterSqliteDatabase) {}
 
@@ -308,7 +305,6 @@ function normalizeSqliteValue(value: unknown): SqliteValue {
   if (value instanceof Uint8Array) {
     return Buffer.from(value);
   }
-  // Natywny sterownik zwraca BLOB jako ArrayBuffer, a plugin API obiecuje Buffer.
   if (value instanceof ArrayBuffer) {
     return Buffer.from(new Uint8Array(value));
   }

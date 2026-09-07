@@ -4775,8 +4775,6 @@ function requestRouteTracePhase(value: SqlValue): RequestRouteTraceHop["phase"] 
     : "routing";
 }
 
-// Parametry idą jedną tablicą: pojedynczy Buffer albo null jako jedyny argument
-// wywala natywny sterownik, a tablica wiąże się pozycyjnie.
 function queryRows(database: SqlDatabase, sql: string, params: SqlValue[] = []): Record<string, SqlValue>[] {
   return database.prepare(sql).all(params) as Record<string, SqlValue>[];
 }
@@ -4786,7 +4784,6 @@ function *iterateAgentAnalysisRows(
   since: string,
   limit: number
 ): IterableIterator<Record<string, SqlValue>> {
-  // Iterator libsql buforuje 100 wierszy, co przy dużych body przekracza limit sterty.
   const batchSize = 8;
   let cursor: { createdAt: string; id: number } | undefined;
   let remaining = limit;

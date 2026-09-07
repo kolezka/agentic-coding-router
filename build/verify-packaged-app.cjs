@@ -18,8 +18,6 @@ module.exports = async function verifyPackagedApp(context) {
     throw new Error(`libsql does not ship a native binary for ${platform}/${arch || "unknown"}.`);
   }
 
-  // Uniwersalny build macOS potrzebuje obu wycinków, w pozostałych przypadkach
-  // instaluje się dokładnie jeden wariant (glibc albo musl).
   const requireEveryCandidate = platform === "darwin" && arch === "universal";
   const present = candidates.filter((candidate) => isFile(nativeModulePath(resourcesDir, candidate.target)));
   if (present.length === 0 || (requireEveryCandidate && present.length !== candidates.length)) {
@@ -54,7 +52,6 @@ function nativeModulePath(resourcesDir, target) {
   return path.join(resourcesDir, "app.asar.unpacked", "node_modules", "@libsql", target, "index.node");
 }
 
-// Nazwy pakietów prebuildów z neon.targets w libsql.
 function libsqlNativeCandidates(platform, arch) {
   if (platform === "darwin") {
     if (arch === "universal") {
