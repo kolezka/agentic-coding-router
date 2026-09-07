@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchUpstreamWithFallback } from "@ccr/core/gateway/upstream/executor.ts";
+import { readProviderCredentialCooldown } from "@ccr/core/providers/credential-pool.ts";
 
 import capturedEmptyCompletionBody from "../../support/empty-completion-response.fixture.json" with { type: "json" };
 import { RequestRouteTraceRecorder } from "@ccr/core/observability/route-trace.ts";
@@ -513,4 +514,36 @@ test("aborting during the empty-completion backoff stops before another dispatch
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
+});
+
+test("an intermediate empty completion leaves the credential usable while an ordinary 502 cools it down", async () => {
+  const fallback = { emptyCompletionRetryCount: 1, mode: "retry", models: [], retryCount: 1 };
+
+  const emptyProvider = responsesProvider({ id: "cooldown-empty", name: "CooldownEmpty" });
+  await runUpstream(
+    {
+      config: configWith(fallback, [emptyProvider]),
+      fallback,
+      routedModel: "CooldownEmpty/gpt-primary"
+    },
+    () => jsonResponse(capturedEmptyCompletionBody, 502)
+  );
+  assert.equal(readProviderCredentialCooldown(emptyProvider, emptyProvider.credentials[0]), undefined);
+
+  const ordinaryProvider = responsesProvider({ id: "cooldown-ordinary", name: "CooldownOrdinary" });
+  await runUpstream(
+    {
+      config: configWith(fallback, [ordinaryProvider]),
+      fallback,
+      routedModel: "CooldownOrdinary/gpt-primary"
+    },
+    () => new Response('{"error":{"message":"boom"}}', {
+      headers: { "content-type": "application/json", "retry-after": "0.001" },
+      status: 502
+    })
+  );
+  assert.equal(
+    readProviderCredentialCooldown(ordinaryProvider, ordinaryProvider.credentials[0])?.reason,
+    "HTTP 502"
+  );
 });

@@ -497,6 +497,10 @@ export async function fetchUpstreamWithFallback(input: {
       while (emptyCompletion.kind === "empty" && budget.retries < emptyCompletionRetryCount) {
         const emptyRetryDelayMs = emptyCompletionRetryDelayMs(budget.retries);
         budget.retries += 1;
+        recordProviderCredentialOutcome(input.config, input.method, attempt, emptyCompletion.status, emptyCompletion.headers, {
+          attemptCount: budget.dispatches,
+          kind: "empty_completion"
+        });
         captureEmptyCompletionOutcome({
           attemptNumber,
           attemptProvider,
@@ -559,6 +563,10 @@ export async function fetchUpstreamWithFallback(input: {
           trace: input.trace
         });
         if (differentTargetIndex !== undefined) {
+          recordProviderCredentialOutcome(input.config, input.method, attempt, emptyCompletion.status, emptyCompletion.headers, {
+            attemptCount: budget.dispatches,
+            kind: "empty_completion"
+          });
           failedAttempts.push({
             credentialChain: attempt.credentialChain,
             credentialIds: attempt.credentialIds,

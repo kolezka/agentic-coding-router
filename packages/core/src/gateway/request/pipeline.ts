@@ -930,7 +930,7 @@ export class GatewayRequestPipeline {
       if (codexApplyPatchBridgeActive || codexMultiAgentBridgeActive || appendContextArchiveFooter || transformCodexCompactResponse || rewriteAnthropicResponseModel) {
         responseHeaders.delete("content-length");
       }
-      recordProviderCredentialOutcome(this.config, method, upstreamResult.attempt, upstreamResponse.status, responseHeaders);
+      recordProviderCredentialOutcome(this.config, method, upstreamResult.attempt, upstreamResponse.status, responseHeaders, upstreamResult.failure);
       if (clientDisconnected || response.destroyed) {
         await cancelResponseBody(upstreamResponse);
         finalizeOpenRouterDiscountSelection(false);

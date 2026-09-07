@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 import { createDefaultAppConfig } from "@ccr/core/config/default-config.ts";
 import { gatewayService } from "@ccr/core/gateway/service.ts";
+import { readProviderCredentialCooldown } from "@ccr/core/providers/credential-pool.ts";
 import { waitForTcpListener } from "../../support/loopback-listener.mjs";
 
 const emptyResponsesStream = [
@@ -106,7 +107,7 @@ test("an exhausted empty stream reaches the client as a typed 502 with no leaked
     await waitForTcpListener(upstream);
     await listen(gateway);
     await waitForTcpListener(gateway);
-    await configureGateway(serverPort(upstream));
+    const config = await configureGateway(serverPort(upstream));
 
     const response = await fetch(`http://127.0.0.1:${serverPort(gateway)}/v1/responses`, {
       body: JSON.stringify({ input: "hello", model: "EmptyUpstream/gpt-empty", stream: true }),
@@ -126,6 +127,8 @@ test("an exhausted empty stream reaches the client as a typed 502 with no leaked
     assert.equal(body.error.details.ccr_empty_completion.reason, "empty_model_output");
     assert.equal(body.error.attempts[0].details.gateway_error.code, "empty_model_output");
     assert.equal(upstreamRequests.length, 3);
+    const provider = config.Providers[0];
+    assert.equal(readProviderCredentialCooldown(provider, provider.credentials[0]), undefined);
   } finally {
     await closeServer(gateway);
     await closeServer(upstream);
@@ -147,16 +150,16 @@ function createGatewayServer() {
   });
 }
 
-async function configureGateway(upstreamPort) {
+async function configureGateway(upstreamPort, providerName = "EmptyUpstream") {
   const config = createDefaultAppConfig();
   config.APIKEY = "test-api-key";
   config.Providers = [
     {
       capabilities: [{ baseUrl: `http://127.0.0.1:${upstreamPort}/v1`, type: "openai_responses" }],
       credentials: [{ apiKey: "upstream-key", id: "main" }],
-      id: "empty-upstream",
+      id: providerName.toLowerCase(),
       models: ["gpt-empty"],
-      name: "EmptyUpstream"
+      name: providerName
     }
   ];
   config.Router.fallback = {
@@ -171,6 +174,7 @@ async function configureGateway(upstreamPort) {
   config.gateway.port = 0;
   await gatewayService.updateConfig(config);
   gatewayService.coreAuthToken = "test-core-auth-token";
+  return config;
 }
 
 function listen(server) {
@@ -203,3 +207,38 @@ function closeServer(server) {
     });
   });
 }
+
+test("an upstream 502 that is not an empty completion still cools the credential down", async () => {
+  const upstream = createServer((request, response) => {
+    request.resume();
+    response.writeHead(502, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { message: "upstream is down" } }));
+  });
+  const gateway = createGatewayServer();
+
+  try {
+    await listen(upstream);
+    await waitForTcpListener(upstream);
+    await listen(gateway);
+    await waitForTcpListener(gateway);
+    const config = await configureGateway(serverPort(upstream), "OrdinaryFailure");
+
+    const response = await fetch(`http://127.0.0.1:${serverPort(gateway)}/v1/responses`, {
+      body: JSON.stringify({ input: "hello", model: "OrdinaryFailure/gpt-empty", stream: true }),
+      headers: {
+        authorization: "Bearer test-api-key",
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+
+    assert.equal(response.status, 502);
+    await response.text();
+    const provider = config.Providers[0];
+    assert.equal(readProviderCredentialCooldown(provider, provider.credentials[0])?.reason, "HTTP 502");
+  } finally {
+    await closeServer(gateway);
+    await closeServer(upstream);
+    await gatewayService.stop();
+  }
+});
