@@ -51,9 +51,6 @@
   <a href="https://github.com/musistudio/claude-code-router/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/musistudio/claude-code-router" /></a>
 </p>
 
-<br />
-
-<img src="blog/images/claude-code-router.png" width="820" alt="Claude Code Router 桌面端控制台" />
 
 </div>
 
@@ -297,21 +294,6 @@ Claude Code · Claude Design · Codex · Grok CLI · Kimi CLI · Kilo Code · Op
       </a>
       <br />
       <sub>国际赞助通道</sub>
-    </td>
-  </tr>
-</table>
-
-<table>
-  <tr>
-    <td align="center" width="220">
-      <strong>支付宝</strong>
-      <br />
-      <img src="/blog/images/alipay.jpg" width="160" alt="支付宝收款码" />
-    </td>
-    <td align="center" width="220">
-      <strong>微信支付</strong>
-      <br />
-      <img src="/blog/images/wechat.jpg" width="160" alt="微信支付收款码" />
     </td>
   </tr>
 </table>
