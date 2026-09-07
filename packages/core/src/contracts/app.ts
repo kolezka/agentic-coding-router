@@ -2272,12 +2272,15 @@ export type UsageComparisonRow = UsageTotals & {
   caption: string;
   client?: string;
   credentialId?: string;
+  estimatedPromptTokenCount?: number;
   key: string;
   label: string;
   logicalModel?: string;
   maxShare: number;
   model?: string;
   provider?: string;
+  requestBodySizeBytes?: number;
+  requestId?: string;
 };
 
 export type UsageStatsSnapshot = {

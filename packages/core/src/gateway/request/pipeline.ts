@@ -8,7 +8,7 @@ import {
   recordGatewayRequestLog
 } from "@ccr/core/observability/request-log-store";
 import { requestLogRequestedModel, requestLogResponseModel } from "@ccr/core/observability/request-log-model";
-import { recordGatewayUsageCapture, type UsageCaptureInput } from "@ccr/core/usage/store";
+import { recordGatewayUsageCapture, type UsageCaptureInput, type UsageCaptureResult } from "@ccr/core/usage/store";
 import { ClaudeCodeRouterPlugin } from "@ccr/core/gateway/claude-code-router-plugin";
 import {
   codexCompactResponseStream,
@@ -56,7 +56,44 @@ export type GatewayRequestPipelineDependencies = {
   getCoreAuthToken: () => string;
   getPlugin: () => ClaudeCodeRouterPlugin | undefined;
   getStatus: () => { coreEndpoint: string; endpoint: string };
+  recordUsageCapture?: (input: UsageCaptureInput) => Promise<UsageCaptureResult | undefined>;
 };
+
+export class SessionPromptTokenCache {
+  private readonly values = new Map<string, number>();
+
+  constructor(private readonly maxEntries = 500) {}
+
+  resolve(sessionId: string | undefined, requestEstimate: number | undefined): number | undefined {
+    const key = sessionId?.trim();
+    if (!key) {
+      return requestEstimate;
+    }
+    const measured = this.values.get(key);
+    if (measured === undefined) {
+      return requestEstimate;
+    }
+    this.values.delete(key);
+    this.values.set(key, measured);
+    return measured;
+  }
+
+  set(sessionId: string | undefined, promptTokens: number | undefined): void {
+    const key = sessionId?.trim();
+    if (!key || promptTokens === undefined || !Number.isFinite(promptTokens) || promptTokens < 0) {
+      return;
+    }
+    this.values.delete(key);
+    this.values.set(key, Math.round(promptTokens));
+    while (this.values.size > this.maxEntries) {
+      const oldest = this.values.keys().next().value;
+      if (oldest === undefined) {
+        return;
+      }
+      this.values.delete(oldest);
+    }
+  }
+}
 
 function reportedRouteChange(
   scope: RequestRouteTraceChange["scope"],
@@ -81,12 +118,15 @@ function isReportedRouteChange(change: RequestRouteTraceChange | undefined): cha
 }
 
 export class GatewayRequestPipeline {
+  private readonly sessionPromptTokenCache = new SessionPromptTokenCache();
+
   constructor(private readonly dependencies: GatewayRequestPipelineDependencies) {}
 
   private get browserWebSearchMcpIntegration() { return this.dependencies.getBrowserWebSearchMcpIntegration(); }
   private get config() { return this.dependencies.getConfig(); }
   private get coreAuthToken() { return this.dependencies.getCoreAuthToken(); }
   private get plugin() { return this.dependencies.getPlugin(); }
+  private get recordUsageCapture() { return this.dependencies.recordUsageCapture ?? recordGatewayUsageCapture; }
   private get status() { return this.dependencies.getStatus(); }
 
   async proxyRequest(request: IncomingMessage, response: ServerResponse, path: string, apiKey?: ApiKeyConfig): Promise<void> {
@@ -98,6 +138,7 @@ export class GatewayRequestPipeline {
 
       const method = request.method ?? "GET";
       const requestBody = await readRequestBody(request);
+      const requestBodySizeBytes = requestBody.byteLength;
       const requestedModel = requestLogRequestedModel(requestBody, path);
       const startedAt = Date.now();
       const startedAtIso = new Date(startedAt).toISOString();
@@ -218,9 +259,49 @@ export class GatewayRequestPipeline {
         });
       }
       const modelBeforeRouting = requestLogRequestedModel(bodyToForward ?? requestBody, path);
+      const shouldCaptureUsage = shouldCaptureGatewayUsage(method, path);
       const usageAttributionConfig = coreGatewayUsageAttributionConfig(this.config);
+      let usageCaptureRecorded = false;
       const recordUsage = (input: Omit<UsageCaptureInput, "config">) => {
-        void recordGatewayUsageCapture({ ...input, config: usageAttributionConfig });
+        if (usageCaptureRecorded) {
+          return;
+        }
+        usageCaptureRecorded = true;
+        const requestEstimate = input.estimatedPromptTokenCount ?? routedTokenCount;
+        const estimatedPromptTokenCount = input.statusCode >= 200 && input.statusCode < 400
+          ? requestEstimate
+          : this.sessionPromptTokenCache.resolve(routedSessionId, requestEstimate);
+        void this.recordUsageCapture({
+          ...input,
+          config: usageAttributionConfig,
+          estimatedPromptTokenCount
+        }).then((capture) => {
+          if (input.statusCode >= 200 && input.statusCode < 400) {
+            this.sessionPromptTokenCache.set(routedSessionId, capture?.measuredPromptTokenCount);
+          }
+        }, (error) => {
+          console.warn(`[usage] Failed to record usage: ${formatError(error)}`);
+        });
+      };
+      const recordClientDisconnectUsage = (responseHeaders = new Headers(pluginResponseHeaders)) => {
+        if (!shouldCaptureUsage) {
+          return;
+        }
+        recordUsage({
+          bodyText: "",
+          client,
+          durationMs: Date.now() - startedAt,
+          estimatedPromptTokenCount: routedTokenCount,
+          fallbackModel: routedModel,
+          method,
+          path,
+          providerName: resolveProviderLogName(responseHeaders, this.config, routedModel),
+          providerProtocol: resolveResponseProviderProtocol(responseHeaders, this.config),
+          requestBodySizeBytes,
+          requestId,
+          responseHeaders,
+          statusCode: clientClosedRequestStatusCode
+        });
       };
       const upstreamAbortController = new AbortController();
       let clientDisconnected = false;
@@ -235,6 +316,7 @@ export class GatewayRequestPipeline {
           clientDisconnected = true;
           upstreamAbortController.abort(new Error(clientDisconnectMessage));
         }
+        recordClientDisconnectUsage();
         onClientDisconnect?.();
       };
 
@@ -307,7 +389,6 @@ export class GatewayRequestPipeline {
         });
       };
 
-      const shouldCaptureUsage = shouldCaptureGatewayUsage(method, path);
       if (shouldServeGatewayModelsResponse(method, path)) {
         if (!reserveApiKeyLimits(apiKey, request, response, bodyToForward)) {
           return;
@@ -741,7 +822,9 @@ export class GatewayRequestPipeline {
           routedModel = error.attempt?.model ?? routedModel;
         }
         if (clientDisconnected || upstreamAbortController.signal.aborted) {
-          writeRequestLog(clientClosedRequestStatusCode, new Headers(pluginResponseHeaders), "", false, clientDisconnectMessage);
+          const disconnectHeaders = new Headers(pluginResponseHeaders);
+          recordClientDisconnectUsage(disconnectHeaders);
+          writeRequestLog(clientClosedRequestStatusCode, disconnectHeaders, "", false, clientDisconnectMessage);
           return;
         }
         const errorResponseHeaders = new Headers(pluginResponseHeaders);
@@ -750,10 +833,12 @@ export class GatewayRequestPipeline {
             bodyText: "",
             client,
             durationMs: Date.now() - startedAt,
+            estimatedPromptTokenCount: routedTokenCount,
             fallbackModel: routedModel,
             method,
             path,
             providerName: resolveProviderLogName(errorResponseHeaders, this.config, routedModel),
+            requestBodySizeBytes,
             providerProtocol: resolveResponseProviderProtocol(errorResponseHeaders, this.config),
             requestId,
             responseHeaders: errorResponseHeaders,
@@ -811,6 +896,7 @@ export class GatewayRequestPipeline {
       if (clientDisconnected || upstreamAbortController.signal.aborted) {
         await cancelResponseBody(upstreamResponse);
         finalizeOpenRouterDiscountSelection(false);
+        recordClientDisconnectUsage(responseHeaders);
         writeRequestLog(clientClosedRequestStatusCode, responseHeaders, "", false, clientDisconnectMessage);
         return;
       }
@@ -848,6 +934,7 @@ export class GatewayRequestPipeline {
       if (clientDisconnected || response.destroyed) {
         await cancelResponseBody(upstreamResponse);
         finalizeOpenRouterDiscountSelection(false);
+        recordClientDisconnectUsage(responseHeaders);
         writeRequestLog(clientClosedRequestStatusCode, responseHeaders, "", false, clientDisconnectMessage);
         return;
       }
@@ -859,11 +946,13 @@ export class GatewayRequestPipeline {
             bodyText: "",
             client,
             durationMs: Date.now() - startedAt,
+            estimatedPromptTokenCount: routedTokenCount,
             fallbackModel: routedModel,
             method,
             path,
             providerName: resolveProviderLogName(responseHeaders, this.config, routedModel),
             providerProtocol: resolveResponseProviderProtocol(responseHeaders, this.config),
+            requestBodySizeBytes,
             requestId,
             responseHeaders,
             statusCode: upstreamResponse.status
@@ -982,11 +1071,13 @@ export class GatewayRequestPipeline {
             bodyText: sampler.read(),
             client,
             durationMs: Date.now() - startedAt,
+            estimatedPromptTokenCount: routedTokenCount,
             fallbackModel: routedModel,
             method,
             path,
             providerName: resolveProviderLogName(responseHeaders, this.config, routedModel),
             providerProtocol: resolveResponseProviderProtocol(responseHeaders, this.config),
+            requestBodySizeBytes,
             requestId,
             responseHeaders,
             statusCode: upstreamResponse.status
