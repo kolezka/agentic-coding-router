@@ -779,6 +779,12 @@ function pickConfig(value: Partial<AppConfig>): LoadedAppConfig {
   if (typeof value.API_TIMEOUT_MS === "string" || typeof value.API_TIMEOUT_MS === "number") {
     config.API_TIMEOUT_MS = value.API_TIMEOUT_MS;
   }
+  if (
+    typeof value.API_STREAM_IDLE_TIMEOUT_MS === "string" ||
+    typeof value.API_STREAM_IDLE_TIMEOUT_MS === "number"
+  ) {
+    config.API_STREAM_IDLE_TIMEOUT_MS = value.API_STREAM_IDLE_TIMEOUT_MS;
+  }
   if (typeof value.CUSTOM_ROUTER_PATH === "string") {
     config.CUSTOM_ROUTER_PATH = value.CUSTOM_ROUTER_PATH.trim();
   }

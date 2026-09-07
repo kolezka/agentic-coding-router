@@ -1833,6 +1833,15 @@ export type AppConfig = {
   APIKEY: string;
   APIKEYS: ApiKeyConfig[];
   API_TIMEOUT_MS: number | string;
+  /**
+   * How long a Responses stream may run without the model making progress, in
+   * milliseconds. Unset inherits `API_TIMEOUT_MS`; a literal `0` disables the
+   * watchdog but keeps the terminal-event close. Text, reasoning, refusal and
+   * tool-argument deltas are progress; SSE heartbeats and repeated lifecycle
+   * events are not, so a model that reasons silently for longer than this
+   * budget is cut off.
+   */
+  API_STREAM_IDLE_TIMEOUT_MS?: number | string;
   CUSTOM_ROUTER_PATH: string;
   HOST: string;
   PORT: number;
