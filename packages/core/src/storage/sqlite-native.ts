@@ -1,10 +1,10 @@
-import { createRequire } from "node:module";
-import DatabaseConstructor, { type Database as BetterSqliteDatabase } from "better-sqlite3";
+import { pathToFileURL } from "node:url";
+import DatabaseConstructor, { type Database as BetterSqliteDatabase } from "libsql";
 
 export type {
   Database as BetterSqliteDatabase,
   Statement as BetterSqliteStatement
-} from "better-sqlite3";
+} from "libsql";
 
 export type BetterSqliteDatabaseOptions = {
   fileMustExist?: boolean;
@@ -12,29 +12,51 @@ export type BetterSqliteDatabaseOptions = {
   timeout?: number;
 };
 
-const requireFromHere = createRequire(__filename);
-let resolvedNativeBinding: string | undefined;
-let nativeBindingResolved = false;
+const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+const MAX_BUSY_TIMEOUT_MS = 2147483647;
 
 export function createBetterSqliteDatabase(
   filename: string,
   options: BetterSqliteDatabaseOptions = {}
 ): BetterSqliteDatabase {
-  const nativeBinding = resolveBetterSqliteNativeBinding();
-  return nativeBinding
-    ? new DatabaseConstructor(filename, { ...options, nativeBinding })
-    : new DatabaseConstructor(filename, options);
+  const readonly = options.readonly === true;
+  const database = new DatabaseConstructor(resolveDatabaseLocation(filename, options), {
+    timeout: resolveBusyTimeout(options.timeout)
+  });
+  database.name = filename;
+  database.readonly = readonly;
+  return database;
 }
 
-function resolveBetterSqliteNativeBinding(): string | undefined {
-  if (nativeBindingResolved) {
-    return resolvedNativeBinding;
+function resolveDatabaseLocation(filename: string, options: BetterSqliteDatabaseOptions): string {
+  if (isTransientDatabaseFilename(filename)) {
+    if (options.readonly === true) {
+      throw new TypeError(`Cannot open ${filename || "a temporary database"} in readonly mode`);
+    }
+    return filename;
   }
-  nativeBindingResolved = true;
-  try {
-    resolvedNativeBinding = requireFromHere.resolve("better-sqlite3/build/Release/better_sqlite3.node");
-  } catch {
-    resolvedNativeBinding = undefined;
+
+  const location = pathToFileURL(filename);
+  if (options.readonly === true) {
+    location.searchParams.set("mode", "ro");
+  } else if (options.fileMustExist === true) {
+    location.searchParams.set("mode", "rw");
   }
-  return resolvedNativeBinding;
+  return location.href;
+}
+
+function isTransientDatabaseFilename(filename: string): boolean {
+  return filename === ":memory:" || filename === "";
+}
+
+function resolveBusyTimeout(timeout: number | undefined): number {
+  if (timeout === undefined) {
+    return DEFAULT_BUSY_TIMEOUT_MS;
+  }
+  if (!Number.isInteger(timeout) || timeout < 0 || timeout > MAX_BUSY_TIMEOUT_MS) {
+    throw new TypeError(
+      `Expected the timeout option to be an integer between 0 and ${MAX_BUSY_TIMEOUT_MS}`
+    );
+  }
+  return timeout;
 }

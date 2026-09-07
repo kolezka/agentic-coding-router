@@ -788,7 +788,7 @@ function configureSqliteDatabase(database: SqlDatabase): void {
 }
 
 function queryRows(database: SqlDatabase, sql: string, params: SqlValue[] = []): Array<Record<string, SqlValue>> {
-  return database.prepare(sql).all(...params) as Array<Record<string, SqlValue>>;
+  return database.prepare(sql).all(params) as Array<Record<string, SqlValue>>;
 }
 
 function readPositiveInteger(value: unknown): number | undefined {

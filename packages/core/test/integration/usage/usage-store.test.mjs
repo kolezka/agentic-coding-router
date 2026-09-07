@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { RequestLogStore } from "@ccr/core/observability/request-log-store.ts";
 import { createBetterSqliteDatabase } from "@ccr/core/storage/sqlite-native.ts";
+import { rowWithoutDriverMetadata } from "../../support/sqlite-row.mjs";
 import { GatewayBillingSynchronizer } from "@ccr/core/usage/billing-sync.ts";
 import { resolveUsageModelAttribution } from "@ccr/core/usage/model-attribution.ts";
 import { UsageStore } from "@ccr/core/usage/store.ts";
@@ -196,7 +197,7 @@ test("UsageStore retains request metadata for failed captures without response u
         FROM usage_events
         WHERE request_id = ?
       `).get("failed-request-metadata");
-      assert.deepEqual(row, {
+      assert.deepEqual(rowWithoutDriverMetadata(row), {
         estimated_prompt_token_count: 73,
         input_tokens: 0,
         output_tokens: 0,
@@ -258,7 +259,7 @@ test("UsageStore reports measured prompt tokens while preserving response usage"
         FROM usage_events
         WHERE request_id = ?
       `).get("measured-prompt-request");
-      assert.deepEqual(row, {
+      assert.deepEqual(rowWithoutDriverMetadata(row), {
         cache_read_tokens: 10,
         estimated_prompt_token_count: 999,
         input_tokens: 30,
@@ -299,7 +300,7 @@ test("UsageStore keeps unavailable prompt estimates null", async () => {
         FROM usage_events
         WHERE request_id = ?
       `).get("unavailable-prompt-estimate");
-      assert.deepEqual(row, {
+      assert.deepEqual(rowWithoutDriverMetadata(row), {
         estimated_prompt_token_count: null,
         request_body_size_bytes: 89
       });
@@ -366,7 +367,7 @@ test("UsageStore adds request metadata columns to a legacy database exactly once
         FROM usage_events
         WHERE request_id = ?
       `).get("legacy-migration-request");
-      assert.deepEqual(row, {
+      assert.deepEqual(rowWithoutDriverMetadata(row), {
         estimated_prompt_token_count: 55,
         request_body_size_bytes: 144
       });
@@ -939,7 +940,7 @@ test("UsageStore keeps one event when a request-log backfill races a capture", a
         FROM usage_events
         WHERE request_id = ?
       `).get("duplicate-request-id");
-      assert.deepEqual(row, {
+      assert.deepEqual(rowWithoutDriverMetadata(row), {
         count: 1,
         request_body_size_bytes: 333,
         estimated_prompt_token_count: 73
@@ -998,7 +999,7 @@ test("UsageStore backfills missing events from request logs", async () => {
         FROM usage_events
         WHERE request_id = ?
       `).get("req-backfill-1");
-      assert.deepEqual(row, { request_body_size_bytes: 333 });
+      assert.deepEqual(rowWithoutDriverMetadata(row), { request_body_size_bytes: 333 });
     } finally {
       usageDatabase.close();
     }

@@ -112,11 +112,11 @@ function syncSqliteConfig() {
   }
   let Database;
   try {
-    Database = require("better-sqlite3");
+    Database = require("libsql");
   } catch {
     return;
   }
-  const db = new Database(appConfigDbFile);
+  const db = new Database(appConfigDbFile, { timeout: 5000 });
   try {
     const row = db.prepare("select value_json from app_config where key = ?").get("default");
     if (!row?.value_json) {

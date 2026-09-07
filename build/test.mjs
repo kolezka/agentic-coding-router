@@ -92,7 +92,7 @@ for (const [name, project] of selectedProjects) {
     bundle: true,
     entryPoints,
     external: [
-      "better-sqlite3",
+      "libsql",
       "electron"
     ],
     format: "cjs",

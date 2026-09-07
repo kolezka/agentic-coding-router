@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDefaultAppConfig } from "@ccr/core/config/default-config.ts";
+import { backendService } from "@ccr/core/plugins/backend-service.ts";
 import { compileCoreGatewayConfig, coreGatewayUsageAttributionConfig } from "@ccr/core/gateway/core-runtime/config-compiler.ts";
 import { pluginService } from "@ccr/core/plugins/service.ts";
 import { resolveUsageModelAttribution } from "@ccr/core/usage/model-attribution.ts";
@@ -394,6 +396,99 @@ module.exports = {
     rmSync(dir, { force: true, recursive: true });
   }
 });
+
+const sqliteStoreBlobChildEnvironmentFlag = "CCR_PLUGIN_SQLITE_STORE_BLOB_CHILD";
+const sqliteStoreBlobTestName = "plugin sqlite store round-trips single BLOB and null parameters";
+
+test(sqliteStoreBlobTestName, async () => {
+  const completionMarker = process.env[sqliteStoreBlobChildEnvironmentFlag];
+  if (completionMarker) {
+    await runSqliteStoreBlobWorkload(completionMarker);
+    return;
+  }
+
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-plugin-sqlite-store-child-"));
+  const marker = path.join(dir, "workload-completed");
+
+  const childEnvironment = { ...process.env, [sqliteStoreBlobChildEnvironmentFlag]: marker };
+  delete childEnvironment.NODE_TEST_CONTEXT;
+
+  try {
+    const child = spawnSync(process.execPath, [
+      "--test",
+      "--test-name-pattern",
+      sqliteStoreBlobTestName,
+      __filename
+    ], {
+      encoding: "utf8",
+      env: childEnvironment
+    });
+
+    assert.equal(
+      child.signal,
+      null,
+      `sqlite store workload died from signal ${child.signal}:\n${child.stdout}${child.stderr}`
+    );
+    assert.equal(
+      child.status,
+      0,
+      `sqlite store workload exited with ${child.status}:\n${child.stdout}${child.stderr}`
+    );
+    assert.equal(
+      existsSync(marker),
+      true,
+      `sqlite store workload never ran in the child:\n${child.stdout}${child.stderr}`
+    );
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+async function runSqliteStoreBlobWorkload(completionMarker) {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-plugin-sqlite-store-test-"));
+  const payload = Buffer.from([0, 255, 5]);
+  let store;
+
+  try {
+    store = await backendService.openSqliteStore("sqlite-store-blob-test", dir, {
+      migrate(database) {
+        database.exec("CREATE TABLE blobs (id INTEGER PRIMARY KEY, payload BLOB)");
+      }
+    });
+
+    store.database.run("INSERT INTO blobs (payload) VALUES (?)", [payload]);
+    store.exec("INSERT INTO blobs (payload) VALUES (?)", [payload]);
+    store.database.run("INSERT INTO blobs (payload) VALUES (?)", [null]);
+
+    const insert = store.database.prepare("INSERT INTO blobs (payload) VALUES (?)");
+    insert.run([payload]);
+    insert.free();
+
+    const select = store.database.prepare("SELECT id FROM blobs WHERE payload = ?");
+    select.bind([payload]);
+    const matched = [];
+    while (select.step()) {
+      matched.push(select.getAsObject().id);
+    }
+    select.free();
+
+    const rows = store.exec("SELECT id, payload FROM blobs ORDER BY id", [])[0];
+    assert.deepEqual(rows.columns, ["id", "payload"]);
+    assert.deepEqual(rows.values.map(([id]) => id), [1, 2, 3, 4]);
+    assert.deepEqual(rows.values.map(([, blob]) => (blob === null ? null : Buffer.from(blob))), [
+      payload,
+      payload,
+      null,
+      payload
+    ]);
+    assert.deepEqual(matched, [1, 2, 4]);
+    writeFileSync(completionMarker, "ok");
+  } finally {
+    store?.database.close();
+    await backendService.stopOwner("sqlite-store-blob-test");
+    rmSync(dir, { force: true, recursive: true });
+  }
+}
 
 function createMockResponse() {
   return {

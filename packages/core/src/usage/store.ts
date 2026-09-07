@@ -665,7 +665,7 @@ function configureSqliteDatabase(database: SqlDatabase): void {
 }
 
 function queryRows(database: SqlDatabase, sql: string, params: SqlValue[] = []): Record<string, SqlValue>[] {
-  return database.prepare(sql).all(...params) as Record<string, SqlValue>[];
+  return database.prepare(sql).all(params) as Record<string, SqlValue>[];
 }
 
 function sqlString(value: string): string {

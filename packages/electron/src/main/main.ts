@@ -73,11 +73,11 @@ function configureRuntimeUserDataPath(currentUserDataPath: string): string {
 }
 
 function startupErrorMessage(detail: string): string {
-  if (isBetterSqliteNativeError(detail)) {
+  if (isSqliteNativeError(detail)) {
     return [
       "The bundled SQLite native module could not be loaded.",
       "",
-      "This usually means the Windows package was built with a missing or incompatible better-sqlite3 binary. Rebuild the app with npm run rebuild:sqlite3 before packaging, or build the Windows artifact on a Windows x64 runner.",
+      "This usually means the Windows package was built without the libsql native binary for the target platform. Reinstall dependencies on a Windows x64 host so @libsql/win32-x64-msvc is present before packaging, or build the Windows artifact on a Windows x64 runner.",
       "",
       detail
     ].join("\n");
@@ -86,8 +86,8 @@ function startupErrorMessage(detail: string): string {
   return detail;
 }
 
-function isBetterSqliteNativeError(detail: string): boolean {
-  return /better[-_]sqlite3|better_sqlite3\.node|NODE_MODULE_VERSION|ERR_DLOPEN_FAILED|Cannot find module ['"]better-sqlite3/i.test(detail);
+function isSqliteNativeError(detail: string): boolean {
+  return /@?libsql|libsql-js|NODE_MODULE_VERSION|ERR_DLOPEN_FAILED|Cannot find module ['"]@?libsql/i.test(detail);
 }
 
 function formatErrorDetail(error: unknown): string {
