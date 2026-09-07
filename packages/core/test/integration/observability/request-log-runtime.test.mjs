@@ -8,6 +8,7 @@ import { RequestLogAdmissionStore } from "@ccr/core/observability/request-log-ad
 import { createRequestLogRuntime, RequestLogStore } from "@ccr/core/observability/request-log-store.ts";
 import { RequestRouteTraceRecorder } from "@ccr/core/observability/route-trace.ts";
 import { createBetterSqliteDatabase } from "@ccr/core/storage/sqlite-native.ts";
+import { rowWithoutDriverMetadata } from "../../support/sqlite-row.mjs";
 
 const workerFile = [
   path.resolve(__dirname, "../../../runtime/request-log-worker.js"),
@@ -1144,7 +1145,7 @@ test("RequestLogAdmissionStore polls an existing raw admission without rewriting
         FROM request_log_raw_admission_pending
         WHERE request_id = ?
       `).get("poll-pending-request");
-      assert.deepEqual(second, first);
+      assert.deepEqual(rowWithoutDriverMetadata(second), rowWithoutDriverMetadata(first));
     } finally {
       database.close();
     }
@@ -1253,7 +1254,7 @@ test("RequestLogRuntime retains admission operations across a long SQLite lock w
     runtime.rejectRecord("admission-store-bootstrap", "sampled");
     locker = new Worker(`
       const { parentPort, workerData } = require("node:worker_threads");
-      const Database = require("better-sqlite3");
+      const Database = require("libsql");
       const database = new Database(workerData.dbFile);
       database.pragma("busy_timeout = 1000");
       database.exec("BEGIN IMMEDIATE");

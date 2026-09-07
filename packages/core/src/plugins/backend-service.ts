@@ -147,7 +147,7 @@ class SqliteStoreImpl implements SqliteStore {
   }
 
   persist(): void {
-    // better-sqlite3 writes mutations directly to the database/WAL. Keep this
+    // Native SQLite writes mutations directly to the database/WAL. Keep this
     // method for the plugin API without reintroducing whole-database rewrites.
   }
 
@@ -189,6 +189,9 @@ function openBetterSqliteDatabase(dbFile: string): SqlDatabase {
   return new SqliteCompatDatabase(raw);
 }
 
+// Parametry przekazujemy jako jedną tablicę, nigdy przez spread. Pojedynczy Buffer
+// albo null podany jako jedyny argument do run/get/all wywala proces natywnym panic,
+// a tablica jest wiązana pozycyjnie i przechodzi poprawnie.
 class SqliteCompatDatabase implements SqlDatabase {
   constructor(private readonly raw: BetterSqliteDatabase) {}
 
@@ -205,12 +208,12 @@ class SqliteCompatDatabase implements SqlDatabase {
 
     const statement = this.raw.prepare(sql);
     if (!statement.reader) {
-      statement.run(...normalizedParams);
+      statement.run(normalizedParams);
       return [];
     }
 
     const columns = statement.columns().map((column) => column.name);
-    const rows = statement.all(...normalizedParams) as Array<Record<string, unknown>>;
+    const rows = statement.all(normalizedParams) as Array<Record<string, unknown>>;
     return [{
       columns,
       values: rows.map((row) => columns.map((column) => normalizeSqliteValue(row[column])))
@@ -226,7 +229,7 @@ class SqliteCompatDatabase implements SqlDatabase {
     if (normalizedParams.length === 0) {
       this.raw.exec(sql);
     } else {
-      this.raw.prepare(sql).run(...normalizedParams);
+      this.raw.prepare(sql).run(normalizedParams);
     }
     return this;
   }
@@ -258,14 +261,14 @@ class SqliteCompatStatement implements SqliteStatement {
 
   run(params?: SqliteValue[]): void {
     const normalizedParams = params === undefined ? this.boundParams : normalizeSqliteParams(params);
-    this.statement.run(...normalizedParams);
+    this.statement.run(normalizedParams);
   }
 
   step(): boolean {
     if (!this.statement.reader) {
       return false;
     }
-    this.rows ??= (this.statement.all(...this.boundParams) as Array<Record<string, unknown>>)
+    this.rows ??= (this.statement.all(this.boundParams) as Array<Record<string, unknown>>)
       .map((row) => normalizeSqliteRow(row));
     this.rowIndex += 1;
     const row = this.rows[this.rowIndex];
@@ -304,6 +307,10 @@ function normalizeSqliteValue(value: unknown): SqliteValue {
   }
   if (value instanceof Uint8Array) {
     return Buffer.from(value);
+  }
+  // Natywny sterownik zwraca BLOB jako ArrayBuffer, a plugin API obiecuje Buffer.
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(new Uint8Array(value));
   }
   return String(value);
 }

@@ -1,28 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const betterSqliteNativeRelativePath = path.join(
-  "app.asar.unpacked",
-  "node_modules",
-  "better-sqlite3",
-  "build",
-  "Release",
-  "better_sqlite3.node"
-);
-const betterSqlitePackageRelativePath = path.join("app.asar.unpacked", "node_modules", "better-sqlite3");
-const betterSqlitePrunablePaths = [
-  "deps",
-  "src",
-  "binding.gyp",
-  "README.md",
-  "docs",
-  "benchmark",
-  "benchmarks",
-  "test",
-  path.join("build", "Release", "obj"),
-  path.join("build", "Release", "obj.target")
-];
-
 module.exports = async function verifyPackagedApp(context) {
   const platform = context?.electronPlatformName;
   const arch = normalizeArch(context?.arch);
@@ -34,31 +12,76 @@ module.exports = async function verifyPackagedApp(context) {
 
   const resourcesDir = findResourcesDir(appOutDir, platform);
   assertFile(path.join(resourcesDir, "app.asar"), "Packaged app archive");
-  cleanupBetterSqlitePackage(resourcesDir);
 
-  const nativeModule = path.join(resourcesDir, betterSqliteNativeRelativePath);
-  assertFile(nativeModule, "better-sqlite3 native module");
+  const candidates = libsqlNativeCandidates(platform, arch);
+  if (candidates.length === 0) {
+    throw new Error(`libsql does not ship a native binary for ${platform}/${arch || "unknown"}.`);
+  }
 
-  const nativeInfo = inspectNativeModule(nativeModule);
-  if (nativeInfo.platform !== platform) {
+  // Uniwersalny build macOS potrzebuje obu wycinków, w pozostałych przypadkach
+  // instaluje się dokładnie jeden wariant (glibc albo musl).
+  const requireEveryCandidate = platform === "darwin" && arch === "universal";
+  const present = candidates.filter((candidate) => isFile(nativeModulePath(resourcesDir, candidate.target)));
+  if (present.length === 0 || (requireEveryCandidate && present.length !== candidates.length)) {
     throw new Error(
-      `Packaged better-sqlite3 native module targets ${formatNativeInfo(nativeInfo)}, ` +
-        `but electron-builder is packaging ${platform}/${arch}. Rebuild native dependencies for the target platform before packaging.`
+      `Packaged libsql native module is missing. Expected ${requireEveryCandidate ? "all of" : "one of"}: ` +
+        candidates.map((candidate) => nativeModulePath(resourcesDir, candidate.target)).join(", ")
     );
   }
 
-  if (arch && !nativeArchMatches(nativeInfo, arch)) {
-    throw new Error(
-      `Packaged better-sqlite3 native module targets ${formatNativeInfo(nativeInfo)}, ` +
-        `but electron-builder is packaging ${platform}/${arch}. Run npm run rebuild:sqlite3 on the target platform before packaging.`
-    );
+  for (const candidate of present) {
+    const nativeModule = nativeModulePath(resourcesDir, candidate.target);
+    assertFile(nativeModule, `libsql native module @libsql/${candidate.target}`);
+
+    const nativeInfo = inspectNativeModule(nativeModule);
+    if (nativeInfo.platform !== platform) {
+      throw new Error(
+        `Packaged @libsql/${candidate.target} native module targets ${formatNativeInfo(nativeInfo)}, ` +
+          `but electron-builder is packaging ${platform}/${arch}. Reinstall dependencies for the target platform before packaging.`
+      );
+    }
+
+    if (candidate.arch && !nativeArchMatches(nativeInfo, candidate.arch)) {
+      throw new Error(
+        `Packaged @libsql/${candidate.target} native module targets ${formatNativeInfo(nativeInfo)}, ` +
+          `but electron-builder is packaging ${platform}/${arch}. Reinstall dependencies on a ${platform}/${candidate.arch} host before packaging.`
+      );
+    }
   }
 };
 
-function cleanupBetterSqlitePackage(resourcesDir) {
-  const packageDir = path.join(resourcesDir, betterSqlitePackageRelativePath);
-  for (const relativePath of betterSqlitePrunablePaths) {
-    fs.rmSync(path.join(packageDir, relativePath), { force: true, recursive: true });
+function nativeModulePath(resourcesDir, target) {
+  return path.join(resourcesDir, "app.asar.unpacked", "node_modules", "@libsql", target, "index.node");
+}
+
+// Nazwy pakietów prebuildów z neon.targets w libsql.
+function libsqlNativeCandidates(platform, arch) {
+  if (platform === "darwin") {
+    if (arch === "universal") {
+      return [{ arch: "x64", target: "darwin-x64" }, { arch: "arm64", target: "darwin-arm64" }];
+    }
+    return arch === "x64" || arch === "arm64" ? [{ arch, target: `darwin-${arch}` }] : [];
+  }
+  if (platform === "win32") {
+    return arch === "x64" ? [{ arch, target: "win32-x64-msvc" }] : [];
+  }
+  if (platform === "linux") {
+    if (arch === "armv7l") {
+      return [{ arch, target: "linux-arm-gnueabihf" }, { arch, target: "linux-arm-musleabihf" }];
+    }
+    if (arch === "x64" || arch === "arm64") {
+      return [{ arch, target: `linux-${arch}-gnu` }, { arch, target: `linux-${arch}-musl` }];
+    }
+    return [];
+  }
+  return [];
+}
+
+function isFile(file) {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
   }
 }
 

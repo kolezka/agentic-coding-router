@@ -366,8 +366,8 @@ function writeElectronE2eConfig(
 
 function createLegacyApiKeyDatabase(file: string): void {
   runElectronNode(`
-    const Database = require("better-sqlite3");
-    const database = new Database(process.env.CCR_E2E_SQLITE_FILE);
+    const Database = require("libsql");
+    const database = new Database(process.env.CCR_E2E_SQLITE_FILE, { timeout: 5000 });
     database.exec(\`
       CREATE TABLE api_keys (
         id TEXT PRIMARY KEY,
@@ -406,8 +406,12 @@ function readGatewayRuntimeMarker(file: string): Record<string, unknown> | undef
 
 function readSqliteRows<Row>(file: string, query: string): Row[] {
   const output = runElectronNode(`
-    const Database = require("better-sqlite3");
-    const database = new Database(process.env.CCR_E2E_SQLITE_FILE, { readonly: true });
+    const { pathToFileURL } = require("node:url");
+    const Database = require("libsql");
+    // libsql ignoruje opcję readonly, tryb tylko do odczytu wchodzi przez URI pliku.
+    const location = pathToFileURL(process.env.CCR_E2E_SQLITE_FILE);
+    location.searchParams.set("mode", "ro");
+    const database = new Database(location.href, { timeout: 5000 });
     const rows = database.prepare(process.env.CCR_E2E_SQLITE_QUERY).all();
     database.close();
     process.stdout.write(JSON.stringify(rows));

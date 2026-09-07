@@ -43,7 +43,7 @@
   "dependencies": {
     "@the-next-ai/ai-gateway": "^1.0.18",
     "@the-next-ai/bot-gateway-sdk": "^0.1.0",
-    "better-sqlite3": "^12.11.1",
+    "libsql": "^0.5.29",
     "node-forge": "^1.4.0",
     "undici": "^7.29.1"
   }

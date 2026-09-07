@@ -23,7 +23,7 @@ try {
       "request-log-web-load": path.join(projectRoot, "packages/core/benchmark/request-log-web-load.mjs"),
       "request-log-worker": path.join(projectRoot, "packages/core/src/observability/request-log-worker.ts")
     },
-    external: ["better-sqlite3", "electron", "undici"],
+    external: ["libsql", "electron", "undici"],
     format: "cjs",
     legalComments: "none",
     logLevel: "warning",
@@ -96,7 +96,7 @@ function parseArgs(values) {
 function resolveRuntime() {
   const probe = spawnSync(process.execPath, [
     "-e",
-    "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.close();"
+    "const Database = require('libsql'); const db = new Database(':memory:'); db.close();"
   ], { stdio: "ignore" });
   return probe.status === 0 ? "node" : "electron";
 }

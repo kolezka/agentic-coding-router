@@ -377,7 +377,7 @@ function uniqueGatewayNodeRuntimeCandidates(candidates: GatewayNodeRuntime[]): G
 
 function resolveGatewayNativeProbeModule(): string | undefined {
   try {
-    return requireFromHere.resolve("better-sqlite3");
+    return requireFromHere.resolve("libsql");
   } catch {
     return undefined;
   }

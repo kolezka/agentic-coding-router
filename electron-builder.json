@@ -30,14 +30,7 @@
   ],
   "files": [
     "dist",
-    "package.json",
-    "!node_modules/better-sqlite3/deps/**",
-    "!node_modules/better-sqlite3/src/**",
-    "!node_modules/better-sqlite3/binding.gyp",
-    "!node_modules/better-sqlite3/README.md",
-    "!node_modules/better-sqlite3/docs/**",
-    "!node_modules/better-sqlite3/benchmark/**",
-    "!node_modules/better-sqlite3/test/**"
+    "package.json"
   ],
   "mac": {
     "icon": "build/icon.icns",

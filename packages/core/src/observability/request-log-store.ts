@@ -4817,8 +4817,10 @@ function requestRouteTracePhase(value: SqlValue): RequestRouteTraceHop["phase"] 
     : "routing";
 }
 
+// Parametry idą jedną tablicą: pojedynczy Buffer albo null jako jedyny argument
+// wywala natywny sterownik, a tablica wiąże się pozycyjnie.
 function queryRows(database: SqlDatabase, sql: string, params: SqlValue[] = []): Record<string, SqlValue>[] {
-  return database.prepare(sql).all(...params) as Record<string, SqlValue>[];
+  return database.prepare(sql).all(params) as Record<string, SqlValue>[];
 }
 
 function iterateRows(
@@ -4826,7 +4828,7 @@ function iterateRows(
   sql: string,
   params: SqlValue[] = []
 ): IterableIterator<Record<string, SqlValue>> {
-  return database.prepare(sql).iterate(...params) as IterableIterator<Record<string, SqlValue>>;
+  return database.prepare(sql).iterate(params) as IterableIterator<Record<string, SqlValue>>;
 }
 
 function firstNumber(rows: Record<string, SqlValue>[], column: string): number {

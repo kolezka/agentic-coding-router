@@ -78,14 +78,14 @@ const forbiddenLightweightMcpInputs = [
   { prefix: "packages/core/src/storage/", reason: "native SQLite storage is not allowed in lightweight MCP subprocesses" },
   { prefix: "packages/electron/src/", reason: "Electron runtime modules are not allowed in lightweight MCP subprocesses" },
   { prefix: "packages/ui/src/", reason: "UI modules do not belong in stdio MCP subprocesses" },
-  { prefix: "node_modules/better-sqlite3/", reason: "native SQLite is not allowed in lightweight MCP subprocesses" },
+  { prefix: "node_modules/libsql/", reason: "native SQLite is not allowed in lightweight MCP subprocesses" },
   { prefix: "node_modules/electron/", reason: "Electron runtime modules are not allowed in lightweight MCP subprocesses" }
 ];
-const forbiddenLightweightMcpExternalImports = new Set(["better-sqlite3", "electron"]);
+const forbiddenLightweightMcpExternalImports = new Set(["libsql", "electron"]);
 
 const nodeExternals = [
   "electron",
-  "better-sqlite3",
+  "libsql",
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`)
 ];
