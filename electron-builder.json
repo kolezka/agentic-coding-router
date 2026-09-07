@@ -43,14 +43,13 @@
     "icon": "build/icon.icns",
     "type": "distribution",
     "hardenedRuntime": true,
-    "forceCodeSigning": true,
+    "forceCodeSigning": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-    "notarize": true,
+    "notarize": false,
     "target": ["dmg", "zip"],
     "artifactName": "Claude-Code-Router_${version}.${ext}"
   },
-  "afterSign": "build/verify-macos-notarization.cjs",
   "win": {
     "icon": "build/icon.ico",
     "target": [
