@@ -51,9 +51,6 @@ Connect Claude Code, Claude Design, Codex, Grok CLI, Kimi CLI, Kilo Code, OpenCo
   <a href="https://github.com/musistudio/claude-code-router/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/musistudio/claude-code-router" /></a>
 </p>
 
-<br />
-
-<img src="blog/images/claude-code-router.png" width="820" alt="Claude Code Router Desktop dashboard" />
 
 </div>
 
@@ -297,21 +294,6 @@ The complete documentation lives at **[ccrdesk.top](https://ccrdesk.top/)**.
       </a>
       <br />
       <sub>International sponsorship</sub>
-    </td>
-  </tr>
-</table>
-
-<table>
-  <tr>
-    <td align="center" width="220">
-      <strong>Alipay</strong>
-      <br />
-      <img src="/blog/images/alipay.jpg" width="160" alt="Alipay QR code" />
-    </td>
-    <td align="center" width="220">
-      <strong>WeChat Pay</strong>
-      <br />
-      <img src="/blog/images/wechat.jpg" width="160" alt="WeChat Pay QR code" />
     </td>
   </tr>
 </table>
