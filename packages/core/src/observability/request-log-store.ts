@@ -1198,73 +1198,31 @@ export class RequestLogStore {
     const analyzed: AnalyzedAgentRequest[] = [];
     let requestScanTruncated = false;
     let scannedRequestCount = 0;
-    const rows = iterateRows(
-      database,
-        `
-          SELECT
-            rowid AS id,
-            created_at,
-            completed_at,
-            request_id,
-            client,
-            method,
-            path,
-            url,
-            provider,
-            credential_id,
-            credential_chain,
-            credential_saturated,
-            model,
-            requested_model,
-            resolved_model,
-            response_model,
-            is_stream,
-            status_code,
-            ok,
-            duration_ms,
-            input_tokens,
-            output_tokens,
-            reasoning_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            total_tokens,
-            cost_usd,
-            request_headers,
-            response_headers,
-            request_body_text,
-            request_body_encoding,
-            request_body_content_type,
-            request_body_size_bytes,
-            request_body_truncated,
-            request_body_ref,
-            response_body_text,
-            response_body_encoding,
-            response_body_content_type,
-            response_body_size_bytes,
-            response_body_truncated,
-            response_body_ref,
-            error
-          FROM request_logs
-          WHERE source_usage_id IS NULL
-            AND path NOT LIKE ?
-            AND created_at >= ?
-          ORDER BY created_at DESC, id DESC
-          LIMIT ?
-        `,
-        ["%/count_tokens%", since.toISOString(), maxAgentAnalysisRows + 1]
-    );
-    // Consume and compact each body before advancing so the query never retains all body text at once.
-    for (const row of rows) {
-      if (scannedRequestCount >= maxAgentAnalysisRows) {
-        requestScanTruncated = true;
-        continue;
+    const ownsReadTransaction = !database.inTransaction;
+    if (ownsReadTransaction) database.exec("BEGIN");
+    try {
+      const rows = iterateAgentAnalysisRows(
+        database,
+        since.toISOString(),
+        maxAgentAnalysisRows + 1
+      );
+      // Consume and compact each body before advancing so the query never retains all body text at once.
+      for (const row of rows) {
+        if (scannedRequestCount >= maxAgentAnalysisRows) {
+          requestScanTruncated = true;
+          continue;
+        }
+        scannedRequestCount += 1;
+        const request = toAnalyzedAgentRequest(toRequestLogEntry(row));
+        if (requestedAgent === "all" || request.agent === requestedAgent) {
+          analyzed.push(request);
+        }
       }
-      scannedRequestCount += 1;
-      const request = toAnalyzedAgentRequest(toRequestLogEntry(row));
-      if (requestedAgent === "all" || request.agent === requestedAgent) {
-        analyzed.push(request);
-      }
+    } catch (error) {
+      if (ownsReadTransaction && database.inTransaction) database.exec("ROLLBACK");
+      throw error;
     }
+    if (ownsReadTransaction && database.inTransaction) database.exec("COMMIT");
 
     analyzed.reverse();
     const requests = applyRequestConcurrency(analyzed);
@@ -4823,12 +4781,94 @@ function queryRows(database: SqlDatabase, sql: string, params: SqlValue[] = []):
   return database.prepare(sql).all(params) as Record<string, SqlValue>[];
 }
 
-function iterateRows(
+function *iterateAgentAnalysisRows(
   database: SqlDatabase,
-  sql: string,
-  params: SqlValue[] = []
+  since: string,
+  limit: number
 ): IterableIterator<Record<string, SqlValue>> {
-  return database.prepare(sql).iterate(params) as IterableIterator<Record<string, SqlValue>>;
+  // Iterator libsql buforuje 100 wierszy, co przy dużych body przekracza limit sterty.
+  const batchSize = 8;
+  let cursor: { createdAt: string; id: number } | undefined;
+  let remaining = limit;
+
+  while (remaining > 0) {
+    const pageLimit = Math.min(batchSize, remaining);
+    const rows = queryRows(
+      database,
+      `
+        SELECT
+          rowid AS id,
+          created_at,
+          completed_at,
+          request_id,
+          client,
+          method,
+          path,
+          url,
+          provider,
+          credential_id,
+          credential_chain,
+          credential_saturated,
+          model,
+          requested_model,
+          resolved_model,
+          response_model,
+          is_stream,
+          status_code,
+          ok,
+          duration_ms,
+          input_tokens,
+          output_tokens,
+          reasoning_tokens,
+          cache_read_tokens,
+          cache_write_tokens,
+          total_tokens,
+          cost_usd,
+          request_headers,
+          response_headers,
+          request_body_text,
+          request_body_encoding,
+          request_body_content_type,
+          request_body_size_bytes,
+          request_body_truncated,
+          request_body_ref,
+          response_body_text,
+          response_body_encoding,
+          response_body_content_type,
+          response_body_size_bytes,
+          response_body_truncated,
+          response_body_ref,
+          error
+        FROM request_logs
+        WHERE source_usage_id IS NULL
+          AND path NOT LIKE ?
+          AND created_at >= ?
+          ${cursor ? "AND (created_at < ? OR (created_at = ? AND rowid < ?))" : ""}
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT ?
+      `,
+      cursor
+        ? ["%/count_tokens%", since, cursor.createdAt, cursor.createdAt, cursor.id, pageLimit]
+        : ["%/count_tokens%", since, pageLimit]
+    );
+    if (rows.length === 0) {
+      return;
+    }
+
+    for (const row of rows) {
+      yield row;
+    }
+    remaining -= rows.length;
+    if (rows.length < pageLimit) {
+      return;
+    }
+
+    const lastRow = rows[rows.length - 1];
+    cursor = {
+      createdAt: String(lastRow.created_at ?? ""),
+      id: normalizeCount(lastRow.id)
+    };
+  }
 }
 
 function firstNumber(rows: Record<string, SqlValue>[], column: string): number {

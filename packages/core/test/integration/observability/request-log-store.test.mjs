@@ -1731,6 +1731,162 @@ test("RequestLogStore streams more body text than the bounded worker heap", {
   }
 });
 
+test("RequestLogStore keeps analysis order stable across keyset pages", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-request-log-analysis-keyset-test-"));
+  let store;
+  try {
+    const dbFile = path.join(dir, "request-logs.sqlite");
+    store = new RequestLogStore(dbFile);
+    await recordLargeAgentRequests(store, dbFile, {
+      paddingBytes: 0,
+      requestCount: 12,
+      sessionId: "keyset-session"
+    });
+
+    const database = createBetterSqliteDatabase(dbFile);
+    try {
+      database.prepare("DELETE FROM request_logs WHERE rowid = ?").run(4);
+      database.prepare("UPDATE request_logs SET path = ? WHERE rowid = ?").run("/v1/count_tokens", 9);
+      database.prepare("UPDATE request_logs SET source_usage_id = ? WHERE rowid = ?").run(1, 10);
+    } finally {
+      database.close();
+    }
+
+    const analysis = await store.analyze({ range: "30d" });
+
+    assert.deepEqual(analysis.recentRequests.map((request) => request.requestId), [
+      "keyset-session-request-11",
+      "keyset-session-request-10",
+      "keyset-session-request-7",
+      "keyset-session-request-6",
+      "keyset-session-request-5",
+      "keyset-session-request-4",
+      "keyset-session-request-2",
+      "keyset-session-request-1",
+      "keyset-session-request-0"
+    ]);
+  } finally {
+    await store?.close();
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("RequestLogStore analyzes one snapshot across keyset pages", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-request-log-analysis-snapshot-test-"));
+  let store;
+  let concurrentDatabase;
+  try {
+    const dbFile = path.join(dir, "request-logs.sqlite");
+    store = new RequestLogStore(dbFile);
+    await recordLargeAgentRequests(store, dbFile, {
+      paddingBytes: 0,
+      requestCount: 9,
+      sessionId: "snapshot-session"
+    });
+    await store.initialize();
+
+    const database = store.database;
+    assert.ok(database);
+    concurrentDatabase = createBetterSqliteDatabase(dbFile);
+    const originalPrepare = database.prepare.bind(database);
+    let injectedWrite = false;
+    database.prepare = (sql) => {
+      const statement = originalPrepare(sql);
+      if (!injectedWrite && sql.includes("ORDER BY created_at DESC, rowid DESC")) {
+        const originalAll = statement.all.bind(statement);
+        statement.all = (...params) => {
+          const rows = originalAll(...params);
+          injectedWrite = true;
+          concurrentDatabase.prepare("DELETE FROM request_logs WHERE request_id = ?")
+            .run("snapshot-session-request-0");
+          return rows;
+        };
+      }
+      return statement;
+    };
+
+    const analysis = await store.analyze({ range: "30d" });
+
+    assert.equal(injectedWrite, true);
+    assert.equal(analysis.scannedRequestCount, 9);
+    assert.equal(analysis.totals.requestCount, 9);
+    assert.equal(concurrentDatabase.inTransaction, false);
+    assert.equal(database.inTransaction, false);
+    const afterConcurrentCommit = await store.list({ pageSize: 10 });
+    assert.equal(
+      afterConcurrentCommit.items.some((request) => request.requestId === "snapshot-session-request-0"),
+      false
+    );
+  } finally {
+    concurrentDatabase?.close();
+    await store?.close();
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("RequestLogStore closes its analysis read transaction after a query error", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-request-log-analysis-rollback-test-"));
+  let store;
+  try {
+    const dbFile = path.join(dir, "request-logs.sqlite");
+    store = new RequestLogStore(dbFile);
+    await recordLargeAgentRequests(store, dbFile, {
+      paddingBytes: 0,
+      requestCount: 1,
+      sessionId: "rollback-session"
+    });
+    await store.initialize();
+
+    const database = store.database;
+    assert.ok(database);
+    const originalPrepare = database.prepare.bind(database);
+    database.prepare = (sql) => {
+      const statement = originalPrepare(sql);
+      if (sql.includes("ORDER BY created_at DESC, rowid DESC")) {
+        statement.all = () => {
+          throw new Error("snapshot query failed");
+        };
+      }
+      return statement;
+    };
+
+    await assert.rejects(store.analyze({ range: "30d" }), /snapshot query failed/);
+    assert.equal(database.inTransaction, false);
+  } finally {
+    await store?.close();
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("RequestLogStore leaves an existing transaction open after analysis", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccr-request-log-analysis-transaction-test-"));
+  let store;
+  try {
+    const dbFile = path.join(dir, "request-logs.sqlite");
+    store = new RequestLogStore(dbFile);
+    await recordLargeAgentRequests(store, dbFile, {
+      paddingBytes: 0,
+      requestCount: 1,
+      sessionId: "existing-transaction-session"
+    });
+    await store.initialize();
+
+    const database = store.database;
+    assert.ok(database);
+    database.exec("BEGIN");
+    try {
+      const analysis = await store.analyze({ range: "30d" });
+      assert.equal(analysis.scannedRequestCount, 1);
+      assert.equal(database.inTransaction, true);
+    } finally {
+      if (database.inTransaction) database.exec("ROLLBACK");
+    }
+  } finally {
+    await store?.close();
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 test("RequestLogStore reports when analysis is bounded by the maximum row count", {
   skip: isBoundedHeapWorker,
   timeout: 30000
