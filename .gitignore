@@ -20,3 +20,6 @@ playwright-report
 blob-report
 .tmp
 .test-dist
+
+# local profile data (contains credentials)
+ccr-data/
